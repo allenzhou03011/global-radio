@@ -2,7 +2,6 @@
 
 这是一个基于 Vue 3 + Vite 的在线电台应用，包含播放、搜索、收藏、历史记录、主题切换与多语言等功能，并支持 PWA 安装。
 
-本项目可作为开源项目托管到 GitHub，并支持本地安装使用与 Docker 部署。
 
 ## 功能概览
 
@@ -30,8 +29,8 @@
 ## 获取源码
 
 ```bash
-git clone https://github.com/<your-username>/<your-repo>.git
-cd <your-repo>
+git clone https://github.com/moli-xia/gloable-radio.git
+cd gloable-radio
 ```
 
 ## 环境要求
@@ -39,21 +38,6 @@ cd <your-repo>
 - Node.js 18+（推荐 18 LTS）
 - npm 9+（建议使用 `npm ci`）
 - Docker 20+（仅 Docker 部署需要）
-
-## 推送到你的 GitHub
-
-1) 在 GitHub 新建一个空仓库（不要勾选初始化 README / .gitignore）。
-
-2) 在本地项目目录执行：
-
-```bash
-git init
-git add -A
-git commit -m "init"
-git branch -M main
-git remote add origin https://github.com/<your-username>/<your-repo>.git
-git push -u origin main
-```
 
 ## 本地安装与开发
 
@@ -65,8 +49,8 @@ npm run dev -- --host 0.0.0.0 --port 4173
 浏览器访问：
 - http://localhost:4173/
 
-局域网访问（同网段设备）：
-- http://<你的电脑IP>:4173/
+外网访问：
+- http://<你的服务器IP>:4173/
 
 ## 构建与预览
 
