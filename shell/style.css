@@ -130,6 +130,19 @@ button {
   color: #007aff;
 }
 
+.saved-block {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px dashed #d1d1d6;
+}
+
+.saved-block .hint {
+  text-align: center;
+}
+
 @media (prefers-color-scheme: dark) {
   body {
     background: #000;

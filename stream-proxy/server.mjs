@@ -8,6 +8,25 @@ const PORT = Number(process.env.STREAM_PROXY_PORT || 3001)
 const PROXY_PREFIX = '/stream-proxy/'
 const AUTH_PREFIX = '/api/auth/'
 const USER_PREFIX = '/api/user/'
+const RADIO_PREFIX = '/api/radio/'
+
+// Radio-Browser community API mirrors. The frontend talks to /api/radio/* on
+// the user's own server so that mobile / desktop clients behind networks
+// that cannot reach radio-browser.info directly still get data. The server
+// (which usually has good upstream connectivity) acts as the bridge.
+const RADIO_BROWSER_PROVIDERS = (process.env.RADIO_BROWSER_PROVIDERS || [
+  'https://us1.api.radio-browser.info',
+  'https://de1.api.radio-browser.info',
+  'https://nl1.api.radio-browser.info',
+  'https://fr1.api.radio-browser.info',
+  'https://at1.api.radio-browser.info',
+  'https://all.api.radio-browser.info'
+].join(',')).split(',').map((url) => url.trim()).filter(Boolean)
+
+const RADIO_USER_AGENT = process.env.RADIO_USER_AGENT || 'GlobalRadio/2.0 (server-proxy)'
+const RADIO_TIMEOUT_MS = Number(process.env.RADIO_TIMEOUT_MS || 8000)
+
+let stickyRadioProviderIdx = 0
 
 const AUTH_SECRET = process.env.AUTH_SECRET || 'global-radio-default-secret-change-me'
 const TOKEN_TTL_MS = Number(process.env.AUTH_TOKEN_TTL_MS || 7 * 24 * 60 * 60 * 1000)
@@ -306,6 +325,85 @@ async function handleUserData(req, res, pathname) {
   sendJson(res, 404, { error: 'Not found' })
 }
 
+async function handleRadioProxy(req, res, reqUrl) {
+  // Forward GET (and HEAD) requests to /api/radio/<path> to one of the
+  // configured radio-browser.info mirrors, with sticky round-robin failover.
+  if (!['GET', 'HEAD'].includes(req.method)) {
+    sendJson(res, 405, { error: 'Method not allowed' })
+    return
+  }
+
+  if (RADIO_BROWSER_PROVIDERS.length === 0) {
+    sendJson(res, 503, { error: 'No radio-browser providers configured' })
+    return
+  }
+
+  const suffix = reqUrl.pathname.slice(RADIO_PREFIX.length) // e.g. "json/stations/topvote/1"
+  if (!suffix || suffix.includes('..')) {
+    sendJson(res, 400, { error: 'Invalid radio endpoint' })
+    return
+  }
+
+  const search = reqUrl.search || ''
+  const total = RADIO_BROWSER_PROVIDERS.length
+  const tried = []
+
+  for (let i = 0; i < total; i++) {
+    const providerIdx = (stickyRadioProviderIdx + i) % total
+    const base = RADIO_BROWSER_PROVIDERS[providerIdx]
+    const target = `${base}/${suffix}${search}`
+
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), RADIO_TIMEOUT_MS)
+
+    try {
+      const upstream = await fetch(target, {
+        method: req.method,
+        headers: {
+          'User-Agent': RADIO_USER_AGENT,
+          Accept: req.headers.accept || 'application/json'
+        },
+        redirect: 'follow',
+        signal: controller.signal
+      })
+      clearTimeout(timer)
+
+      // 5xx counts as provider failure → try the next mirror.
+      if (upstream.status >= 500) {
+        tried.push(`${base}:${upstream.status}`)
+        continue
+      }
+
+      stickyRadioProviderIdx = providerIdx
+
+      const contentType = upstream.headers.get('content-type') || 'application/json; charset=utf-8'
+      const headers = corsHeaders({
+        'Content-Type': contentType,
+        'Cache-Control': 'public, max-age=120'
+      })
+
+      if (req.method === 'HEAD') {
+        res.writeHead(upstream.status, headers)
+        res.end()
+        return
+      }
+
+      const buffer = Buffer.from(await upstream.arrayBuffer())
+      res.writeHead(upstream.status, headers)
+      res.end(buffer)
+      return
+    } catch (error) {
+      clearTimeout(timer)
+      tried.push(`${base}:${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
+
+  sendJson(res, 502, {
+    error: 'All radio-browser providers failed',
+    tried
+  })
+}
+
 async function handleStreamProxy(req, res, reqUrl) {
   const payload = verifyToken(getTokenFromRequest(req))
   if (!payload || !userExists(payload.username)) {
@@ -346,6 +444,11 @@ const server = http.createServer(async (req, res) => {
 
   if (pathname.startsWith(USER_PREFIX)) {
     await handleUserData(req, res, pathname)
+    return
+  }
+
+  if (pathname.startsWith(RADIO_PREFIX)) {
+    await handleRadioProxy(req, res, reqUrl)
     return
   }
 

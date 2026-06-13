@@ -11,6 +11,8 @@ const form = document.getElementById('connect-form')
 const input = document.getElementById('server-url')
 const errorEl = document.getElementById('error')
 const clearBtn = document.getElementById('clear-btn')
+const useSavedBtn = document.getElementById('use-saved-btn')
+const savedHintEl = document.getElementById('saved-hint')
 const languageSelect = document.getElementById('language-select')
 
 let currentLanguage = detectShellLanguage()
@@ -52,12 +54,31 @@ function clearSavedUrl() {
   localStorage.removeItem(STORAGE_KEY)
   input.value = ''
   showError('')
+  refreshSavedControls()
   input.focus()
 }
 
 function connect(url) {
   saveUrl(url)
   window.location.replace(url)
+}
+
+function wantsServerChange() {
+  // The native clients pass `?change=1` when the user explicitly taps
+  // "Server Settings" from the menu, otherwise we auto-connect silently.
+  try {
+    const params = new URLSearchParams(window.location.search)
+    return params.has('change') || params.has('reset')
+  } catch {
+    return false
+  }
+}
+
+function refreshSavedControls() {
+  const hasSaved = !!loadSavedUrl()
+  if (useSavedBtn) useSavedBtn.hidden = !hasSaved
+  if (clearBtn) clearBtn.hidden = !hasSaved
+  if (savedHintEl) savedHintEl.hidden = !hasSaved
 }
 
 function applyTranslations() {
@@ -73,6 +94,8 @@ function applyTranslations() {
   document.getElementById('connect-btn').textContent = messages.connect
   clearBtn.textContent = messages.clearSaved
   document.getElementById('language-label').textContent = messages.languageLabel
+  if (useSavedBtn) useSavedBtn.textContent = messages.useSavedServer
+  if (savedHintEl) savedHintEl.textContent = messages.savedHint
 
   if (languageSelect) {
     languageSelect.innerHTML = ''
@@ -86,28 +109,43 @@ function applyTranslations() {
   }
 }
 
-input.value = loadSavedUrl()
-applyTranslations()
-
-languageSelect?.addEventListener('change', (event) => {
-  currentLanguage = event.target.value
-  saveShellLanguage(currentLanguage)
+const savedUrl = loadSavedUrl()
+if (savedUrl && !wantsServerChange()) {
+  // Already configured — go straight in without ever displaying the URL.
+  window.location.replace(savedUrl)
+} else {
+  // Always start with an empty input so the saved URL is never visible.
+  input.value = ''
+  refreshSavedControls()
   applyTranslations()
-})
 
-form.addEventListener('submit', (event) => {
-  event.preventDefault()
-  showError('')
+  languageSelect?.addEventListener('change', (event) => {
+    currentLanguage = event.target.value
+    saveShellLanguage(currentLanguage)
+    applyTranslations()
+  })
 
-  const normalized = normalizeServerUrl(input.value)
-  if (!normalized) {
-    showError(getShellMessages(currentLanguage).invalidUrlError)
-    return
-  }
+  form.addEventListener('submit', (event) => {
+    event.preventDefault()
+    showError('')
 
-  connect(normalized)
-})
+    const normalized = normalizeServerUrl(input.value)
+    if (!normalized) {
+      showError(getShellMessages(currentLanguage).invalidUrlError)
+      return
+    }
 
-clearBtn.addEventListener('click', clearSavedUrl)
+    connect(normalized)
+  })
 
-input.focus()
+  clearBtn.addEventListener('click', clearSavedUrl)
+
+  useSavedBtn?.addEventListener('click', () => {
+    const saved = loadSavedUrl()
+    if (saved) {
+      window.location.replace(saved)
+    }
+  })
+
+  input.focus()
+}

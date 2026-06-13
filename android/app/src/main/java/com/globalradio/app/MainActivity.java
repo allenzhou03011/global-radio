@@ -13,7 +13,10 @@ import com.getcapacitor.BridgeActivity;
 public class MainActivity extends BridgeActivity {
 
     private static final int MENU_SERVER_SETTINGS = 1;
-    private static final String SHELL_URL = "https://localhost/index.html";
+    // ?change=1 forces the shell to render the input form instead of
+    // auto-connecting to the previously saved URL. This prevents the
+    // backend URL from being exposed in the input field.
+    private static final String SHELL_URL = "https://localhost/index.html?change=1";
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {

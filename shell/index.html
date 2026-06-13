@@ -19,20 +19,28 @@
         <select id="language-select" class="language-select"></select>
       </div>
 
-      <form id="connect-form" class="form">
+      <form id="connect-form" class="form" autocomplete="off">
         <label id="server-url-label" for="server-url"></label>
         <input
           id="server-url"
           name="server-url"
           type="url"
           inputmode="url"
-          autocomplete="url"
+          autocomplete="off"
+          autocorrect="off"
+          autocapitalize="off"
+          spellcheck="false"
           required
         />
         <p id="hint" class="hint"></p>
         <p id="error" class="error" hidden></p>
         <button id="connect-btn" type="submit" class="primary"></button>
-        <button type="button" id="clear-btn" class="secondary"></button>
+
+        <div class="saved-block">
+          <p id="saved-hint" class="hint" hidden></p>
+          <button type="button" id="use-saved-btn" class="secondary" hidden></button>
+          <button type="button" id="clear-btn" class="secondary" hidden></button>
+        </div>
       </form>
     </div>
   </main>

@@ -2,7 +2,10 @@ import UIKit
 import Capacitor
 
 class MainViewController: CAPBridgeViewController {
-    private let shellURL = "https://localhost/index.html"
+    // ?change=1 forces the shell to render the input form instead of
+    // auto-connecting to the previously saved URL. This prevents the
+    // backend URL from being exposed in the input field.
+    private let shellURL = "https://localhost/index.html?change=1"
     private var toolbar: UIToolbar?
 
     override func viewDidLoad() {
