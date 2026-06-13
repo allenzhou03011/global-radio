@@ -341,6 +341,9 @@ export const usePlayerStore = defineStore('player', () => {
     
     // 保存到本地存储
     localStorage.setItem('radio-volume', volume.value.toString())
+    import('@/services/userDataSyncTrigger').then(({ scheduleUserDataPush }) => {
+      scheduleUserDataPush()
+    })
   }
 
   // 切换静音
@@ -352,6 +355,9 @@ export const usePlayerStore = defineStore('player', () => {
     
     // 保存到本地存储
     localStorage.setItem('radio-muted', isMuted.value.toString())
+    import('@/services/userDataSyncTrigger').then(({ scheduleUserDataPush }) => {
+      scheduleUserDataPush()
+    })
   }
 
   // 添加到收藏夹
@@ -408,6 +414,9 @@ export const usePlayerStore = defineStore('player', () => {
   // 保存收藏夹到本地存储
   const saveFavorites = () => {
     localStorage.setItem('radio-favorites', JSON.stringify(favorites.value))
+    import('@/services/userDataSyncTrigger').then(({ scheduleUserDataPush }) => {
+      scheduleUserDataPush()
+    })
   }
 
   // 从本地存储加载收藏夹
