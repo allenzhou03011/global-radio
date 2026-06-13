@@ -8,7 +8,8 @@ async function main() {
   page.on('console', (msg) => logs.push(`[${msg.type()}] ${msg.text()}`))
   page.on('pageerror', (err) => logs.push(`[pageerror] ${err.message}`))
 
-  await page.goto('https://global-radio.example.com/', { waitUntil: 'domcontentloaded', timeout: 60000 })
+  const TARGET = process.env.E2E_TARGET || 'https://global-radio.example.com'
+  await page.goto(`${TARGET}/`, { waitUntil: 'domcontentloaded', timeout: 60000 })
   await page.waitForTimeout(2000)
 
   const searchTab = page.locator('a[href*="search"], button:has-text("搜索"), nav a').filter({ hasText: /搜索|Search/i }).first()
@@ -16,7 +17,7 @@ async function main() {
     await searchTab.click()
     await page.waitForTimeout(1000)
   } else {
-    await page.goto('https://global-radio.example.com/search', { waitUntil: 'domcontentloaded' })
+    await page.goto(`${TARGET}/search`, { waitUntil: 'domcontentloaded' })
     await page.waitForTimeout(1000)
   }
 
