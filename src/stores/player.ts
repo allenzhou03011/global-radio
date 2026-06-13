@@ -5,7 +5,7 @@ import type { RadioStation, PlayerState, FavoriteStation } from '@/types/radio'
 import { useHistoryStore } from './history'
 import { mediaSessionManager } from '@/utils/mediaSession'
 import { deviceOptimization } from '@/utils/deviceOptimization'
-import { isHlsStream, resolveStreamUrl, supportsNativeHls, upgradeToHttpsIfNeeded } from '@/utils/streamUrl'
+import { isHlsStream, resolveStreamUrl, supportsNativeHls } from '@/utils/streamUrl'
 // MediaControl插件已移除
 import { Capacitor } from '@capacitor/core'
 import { MediaSession } from '@jofr/capacitor-media-session'
@@ -42,19 +42,10 @@ export const usePlayerStore = defineStore('player', () => {
   }
 
   const createHlsInstance = (): Hls => {
-    const config: ConstructorParameters<typeof Hls>[0] = {
+    return new Hls({
       enableWorker: true,
       lowLatencyMode: true
-    }
-
-    if (typeof window !== 'undefined' && window.location.protocol === 'https:') {
-      config.fetchSetup = (context, initParams) => {
-        const url = upgradeToHttpsIfNeeded(context.url)
-        return new Request(url, initParams)
-      }
-    }
-
-    return new Hls(config)
+    })
   }
 
   const playWithHls = async (streamUrl: string): Promise<void> => {
