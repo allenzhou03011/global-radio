@@ -19,9 +19,12 @@
     "ios:open": "npx cap open ios",
     "desktop:dev": "electron desktop/main.mjs",
     "desktop:start": "electron desktop/main.mjs",
-    "desktop:pack:win": "electron-builder --win --arm64",
-    "desktop:pack:linux": "electron-builder --linux --arm64",
+    "desktop:pack:win": "electron-builder --win --x64",
+    "desktop:pack:win:arm64": "electron-builder --win --arm64",
+    "desktop:pack:linux": "electron-builder --linux --x64",
+    "desktop:pack:mac": "electron-builder --mac",
     "release:build": "bash scripts/release-build.sh",
+    "release:publish": "bash scripts/release-publish.sh",
     "capacitor:init": "npx cap init",
     "capacitor:add-android": "npx cap add android",
     "capacitor:add-ios": "npx cap add ios",
@@ -68,9 +71,49 @@
   },
   "build": {
     "appId": "com.globalradio.app",
-    "productName": "全球电台",
+    "productName": "GlobalRadio",
+    "asar": true,
     "directories": {
-      "output": "dist-desktop"
+      "output": "dist-desktop",
+      "buildResources": "build"
     },
+    "extraMetadata": {
+      "main": "desktop/main.mjs"
+    },
+    "files": [
+      "desktop/**/*",
+      "shell/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        }
+      ],
+      "artifactName": "GlobalRadio_${version}_${arch}-setup.${ext}",
+      "icon": "build/icon.png"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": false,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "GlobalRadio"
+    },
+    "linux": {
+      "target": ["AppImage"],
+      "category": "AudioVideo",
+      "artifactName": "GlobalRadio_${version}_${arch}.${ext}",
+      "icon": "build/icon.png"
+    },
+    "mac": {
+      "target": ["dmg"],
+      "category": "public.app-category.music",
+      "artifactName": "GlobalRadio_${version}_${arch}.${ext}",
+      "icon": "build/icon.png"
+    }
   }
 }

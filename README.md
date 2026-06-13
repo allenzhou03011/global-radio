@@ -175,7 +175,31 @@ cp config/users.example.json config/users.json
 |------|--------------|----------|
 | Android | 右上角「服务器设置」 | `npm run android:build` → `./android-build.sh` → Android Studio 或 `npm run apk:release` |
 | iOS | 顶部「服务器设置」 | `npm run ios:build` → `./ios-build.sh` → macOS 上 `pod install` + Xcode |
-| Windows | 菜单「应用 → 服务器设置」 | `npm run desktop:dev` 本地调试；Windows 上 `npm run desktop:pack:win` 打包 |
+| Windows | 菜单「应用 → 服务器设置」 | `npm run desktop:dev` 本地调试；`npm run desktop:pack:win`（x64 NSIS） |
+
+### 一键三端 Release 构建
+
+仓库提供两种构建发布方式：
+
+**本地批量构建**
+
+```bash
+npm run release:build             # 编译所有可用平台 → release/
+npm run release:build android     # 仅 Android
+npm run release:build windows     # 仅 Windows（macOS/Linux 上需要 wine 已自动下载）
+npm run release:build ios         # 仅 iOS（需要 macOS + 完整 Xcode + CocoaPods）
+
+npm run release:publish           # 通过 gh CLI 上传 release/ 到 GitHub Release
+```
+
+产物命名（与上游对齐）：
+- `release/GlobalRadio-v<version>.apk`
+- `release/GlobalRadio-<version>.ipa`
+- `release/GlobalRadio_<version>_x64-setup.exe`
+
+**GitHub Actions 自动构建**
+
+`.github/workflows/release.yml` 在推送 `v*` tag 时会并行编译三端并自动发布到 GitHub Release。手动触发也支持，从 Actions 页面 `Release` 工作流选择 `Run workflow` 即可。
 
 ### Android APK
 
