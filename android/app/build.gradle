@@ -1,5 +1,54 @@
 apply plugin: 'com.android.application'
 
+// Release signing config: prefer a real keystore if any of the supported
+// inputs are present, otherwise fall back to the SDK debug keystore so
+// `./gradlew assembleDebug` still works locally without setup.
+//
+// Lookup order:
+//   1. Environment variables (used by CI)
+//        ANDROID_KEYSTORE_PATH
+//        ANDROID_KEYSTORE_PASSWORD
+//        ANDROID_KEY_ALIAS
+//        ANDROID_KEY_PASSWORD
+//   2. android/keystore.properties (used locally; gitignored)
+//        storeFile=/absolute/path/to/release.jks
+//        storePassword=...
+//        keyAlias=...
+//        keyPassword=...
+def releaseKeystoreFile = null
+def releaseStorePassword = null
+def releaseKeyAlias = null
+def releaseKeyPassword = null
+
+def envKeystorePath = System.getenv('ANDROID_KEYSTORE_PATH')
+if (envKeystorePath != null && !envKeystorePath.isEmpty()) {
+    def candidate = file(envKeystorePath)
+    if (candidate.exists()) {
+        releaseKeystoreFile = candidate
+        releaseStorePassword = System.getenv('ANDROID_KEYSTORE_PASSWORD')
+        releaseKeyAlias = System.getenv('ANDROID_KEY_ALIAS')
+        releaseKeyPassword = System.getenv('ANDROID_KEY_PASSWORD')
+    }
+} else {
+    def propsFile = rootProject.file('keystore.properties')
+    if (propsFile.exists()) {
+        def props = new Properties()
+        propsFile.withInputStream { props.load(it) }
+        def storeFilePath = props['storeFile']
+        if (storeFilePath != null) {
+            def candidate = file(storeFilePath)
+            if (candidate.exists()) {
+                releaseKeystoreFile = candidate
+                releaseStorePassword = props['storePassword']
+                releaseKeyAlias = props['keyAlias']
+                releaseKeyPassword = props['keyPassword']
+            }
+        }
+    }
+}
+
+def hasReleaseKeystore = releaseKeystoreFile != null
+
 android {
     namespace "com.globalradio.app"
     compileSdk rootProject.ext.compileSdkVersion
@@ -17,12 +66,23 @@ android {
         }
     }
 
+    signingConfigs {
+        if (hasReleaseKeystore) {
+            release {
+                storeFile releaseKeystoreFile
+                storePassword releaseStorePassword
+                keyAlias releaseKeyAlias
+                keyPassword releaseKeyPassword
+            }
+        }
+    }
+
     buildTypes {
         release {
             minifyEnabled true
             shrinkResources true
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
-            signingConfig signingConfigs.debug
+            signingConfig hasReleaseKeystore ? signingConfigs.release : signingConfigs.debug
         }
         debug {
             debuggable true

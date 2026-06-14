@@ -25,3 +25,9 @@ android/app/src/main/assets/public
 dist-desktop
 release
 config/users.json
+
+# Android signing — never commit
+*.jks
+*.keystore
+keystore.properties
+android/keystore.properties
