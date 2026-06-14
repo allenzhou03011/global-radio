@@ -7,6 +7,7 @@ import android.app.PendingIntent;
 import android.app.Service;
 import android.content.Context;
 import android.content.Intent;
+import android.content.pm.ServiceInfo;
 import android.net.wifi.WifiManager;
 import android.os.Build;
 import android.os.IBinder;
@@ -72,7 +73,25 @@ public class MediaPlaybackService extends Service {
         String title = intent.getStringExtra(EXTRA_TITLE);
         String subtitle = intent.getStringExtra(EXTRA_SUBTITLE);
 
-        startForeground(NOTIFICATION_ID, buildNotification(title, subtitle));
+        Notification notification = buildNotification(title, subtitle);
+        // Android 10+ requires a foregroundServiceType to identify the
+        // service as media playback. On Android 14 (API 34) this is
+        // strictly enforced: without the type the OS quietly downgrades
+        // the service and kills it shortly after the screen turns off,
+        // which is exactly the regression v2.0.6's SDK 34 bump caused.
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                startForeground(NOTIFICATION_ID, notification,
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK);
+            } else {
+                startForeground(NOTIFICATION_ID, notification);
+            }
+        } catch (Exception e) {
+            // Fall back to the legacy call if the typed variant is rejected
+            // (e.g. missing permission on a misconfigured ROM). Better to
+            // have a partially-protected service than no service at all.
+            startForeground(NOTIFICATION_ID, notification);
+        }
         acquireLocks();
         return START_STICKY;
     }
@@ -119,6 +138,13 @@ public class MediaPlaybackService extends Service {
             : PendingIntent.FLAG_UPDATE_CURRENT;
         PendingIntent contentIntent = PendingIntent.getActivity(this, 0, launchIntent, pendingFlags);
 
+        // @jofr/capacitor-media-session already publishes the user-facing
+        // media notification (lock-screen controls, MediaStyle). Ours is
+        // intentionally minimal — its only job is to hold foreground state
+        // + wake locks. We use CATEGORY_SERVICE (not CATEGORY_TRANSPORT)
+        // and VISIBILITY_PRIVATE so HyperOS/MIUI don't treat it as a
+        // second active media controller and "helpfully" keep the screen
+        // lit while playing.
         return new NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.mipmap.ic_launcher)
             .setContentTitle(title != null && !title.isEmpty() ? title : getString(R.string.app_name))
@@ -127,9 +153,9 @@ public class MediaPlaybackService extends Service {
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setShowWhen(false)
-            .setPriority(NotificationCompat.PRIORITY_LOW)
-            .setCategory(NotificationCompat.CATEGORY_TRANSPORT)
-            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            .setPriority(NotificationCompat.PRIORITY_MIN)
+            .setCategory(NotificationCompat.CATEGORY_SERVICE)
+            .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
             .build();
     }
 

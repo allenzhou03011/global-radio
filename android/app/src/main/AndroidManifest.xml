@@ -26,16 +26,14 @@
 
         </activity>
 
-        <!-- 媒体播放前台服务 -->
+        <!-- 媒体播放前台服务：仅持有 foreground 状态 + WakeLock/WifiLock。
+             实际的 MediaSession / lock-screen 控件由 @jofr 插件提供，所以
+             这里不需要 MEDIA_BUTTON 监听。-->
         <service
             android:name=".MediaPlaybackService"
             android:enabled="true"
             android:exported="false"
-            android:foregroundServiceType="mediaPlayback">
-            <intent-filter>
-                <action android:name="android.intent.action.MEDIA_BUTTON" />
-            </intent-filter>
-        </service>
+            android:foregroundServiceType="mediaPlayback" />
 
         <!-- 媒体按钮接收器 -->
         <receiver android:name="androidx.media.session.MediaButtonReceiver"

@@ -30,18 +30,30 @@ public class BackgroundAudioPlugin extends Plugin {
         intent.putExtra(MediaPlaybackService.EXTRA_TITLE, title);
         intent.putExtra(MediaPlaybackService.EXTRA_SUBTITLE, subtitle);
 
-        try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+        boolean started = false;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            try {
                 getContext().startForegroundService(intent);
-            } else {
-                getContext().startService(intent);
+                started = true;
+            } catch (Exception e) {
+                // On Android 14+ this can throw ForegroundServiceStartNotAllowedException
+                // if the app is briefly considered "not in foreground" (e.g. coming
+                // back from a notification tap). Fall through to startService(), the
+                // service itself will still call startForeground() in onStartCommand.
             }
-            JSObject result = new JSObject();
-            result.put("started", true);
-            call.resolve(result);
-        } catch (Exception e) {
-            call.reject("Failed to start background audio service: " + e.getMessage());
         }
+        if (!started) {
+            try {
+                getContext().startService(intent);
+                started = true;
+            } catch (Exception e) {
+                call.reject("Failed to start background audio service: " + e.getMessage());
+                return;
+            }
+        }
+        JSObject result = new JSObject();
+        result.put("started", true);
+        call.resolve(result);
     }
 
     @PluginMethod

@@ -2,6 +2,17 @@
 
 所有重要变更都会记录在这里。版本号遵循 [SemVer](https://semver.org/lang/zh-CN/)。
 
+## [2.0.8] - 2026-06-14
+
+### Fixed
+
+- **Android 锁屏后几秒内播放停止（v2.0.6 引入的回归）** —— v2.0.6 把 `targetSdkVersion` 升到 34，但 `MediaPlaybackService.startForeground()` 还在用旧的两参数版本。Android 14 (API 34) 严格要求 mediaPlayback 类型的前台服务必须用 3 参数版本传入 `FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK`，否则系统不把它当媒体服务，息屏几秒内就被杀掉。现在按 API 级别分发：API 29+ 用 3 参数版本，老设备保留旧调用。`BackgroundAudioPlugin` 同时加上 `startForegroundService` 失败时降级到 `startService` 的兜底，避免被 `ForegroundServiceStartNotAllowedException` 卡住。
+- **Android 前台时不息屏（怀疑由媒体通知触发）** —— HyperOS / MIUI 上有些版本看到"媒体类"通知就强行保持屏幕常亮。`@jofr/capacitor-media-session` 已经在提供真正的锁屏控件，我们自己的 `MediaPlaybackService` 通知没必要再标成 `CATEGORY_TRANSPORT` + `VISIBILITY_PUBLIC`。改成 `CATEGORY_SERVICE` + `VISIBILITY_PRIVATE` + `PRIORITY_MIN`，并从 manifest 里删掉误导性的 `MEDIA_BUTTON` intent-filter，避免被系统当作第二个媒体控制器。
+
+### Improved
+
+- **音频被系统意外暂停时自动恢复** —— 锁屏瞬间 WebView 偶尔会短暂把 `<audio>` 元素停掉（即便前台服务已经持锁）。新增 `playbackIntent` 追踪用户真实意图，监听 `pause` 事件时如果用户其实想"playing"，500ms 后自动 `play()` 一次。15 秒内最多重试 3 次，避免真坏掉的流陷入死循环。
+
 ## [2.0.7] - 2026-06-14
 
 ### Improved

@@ -28,6 +28,21 @@ export const usePlayerStore = defineStore('player', () => {
   const isDucked = ref(false)
   const hlsInstance = ref<Hls | null>(null)
 
+  // Tracks the user's intent (vs the actual audio element state), so we
+  // can distinguish a user-triggered pause from the WebView/system silently
+  // suspending the audio element when the screen locks.
+  const playbackIntent = ref<'playing' | 'paused' | 'stopped'>('stopped')
+  let pauseRecoveryAttempts = 0
+  let pauseRecoveryResetTimer: ReturnType<typeof setTimeout> | null = null
+
+  const noteRecoveryAttempt = () => {
+    pauseRecoveryAttempts++
+    if (pauseRecoveryResetTimer) clearTimeout(pauseRecoveryResetTimer)
+    pauseRecoveryResetTimer = setTimeout(() => {
+      pauseRecoveryAttempts = 0
+    }, 15000)
+  }
+
   const destroyHls = () => {
     if (hlsInstance.value) {
       hlsInstance.value.destroy()
@@ -178,7 +193,33 @@ export const usePlayerStore = defineStore('player', () => {
       
       audio.value.addEventListener('pause', () => {
         isPlaying.value = false
-        // 媒体控制已移除
+
+        // Self-heal: if the user wants playback but the WebView quietly
+        // paused us (typical Android pattern when the screen turns off
+        // and the OS briefly suspends the media element before our
+        // foreground service takes effect), attempt to resume. Capped at
+        // 3 attempts per 15 s so a genuinely-broken stream doesn't loop.
+        if (
+          playbackIntent.value === 'playing' &&
+          currentStation.value &&
+          audio.value &&
+          !audio.value.ended &&
+          pauseRecoveryAttempts < 3
+        ) {
+          noteRecoveryAttempt()
+          const target = audio.value
+          setTimeout(() => {
+            if (
+              playbackIntent.value === 'playing' &&
+              target === audio.value &&
+              target.paused
+            ) {
+              target.play().catch((err) => {
+                console.warn('[playback] auto-resume failed:', err)
+              })
+            }
+          }, 500)
+        }
       })
       
       audio.value.addEventListener('ended', () => {
@@ -298,6 +339,8 @@ export const usePlayerStore = defineStore('player', () => {
       
       console.log(`成功播放电台: ${station.name}`)
 
+      playbackIntent.value = 'playing'
+      pauseRecoveryAttempts = 0
       mediaSessionManager.updateMetadata(station)
       mediaSessionManager.updatePlaybackState(true)
       await announceNativeMetadata(station)
@@ -323,6 +366,7 @@ export const usePlayerStore = defineStore('player', () => {
 
   // 暂停播放
   const pauseStation = async () => {
+    playbackIntent.value = 'paused'
     if (audio.value) {
       audio.value.pause()
     }
@@ -334,6 +378,8 @@ export const usePlayerStore = defineStore('player', () => {
   const resumeStation = async () => {
     if (audio.value && currentStation.value) {
       try {
+        playbackIntent.value = 'playing'
+        pauseRecoveryAttempts = 0
         await audio.value.play()
         mediaSessionManager.updatePlaybackState(true)
         await announceNativePlaybackState('playing')
@@ -347,6 +393,7 @@ export const usePlayerStore = defineStore('player', () => {
 
   // 停止播放
   const stopStation = async () => {
+    playbackIntent.value = 'stopped'
     destroyHls()
     if (audio.value) {
       audio.value.pause()
