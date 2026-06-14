@@ -358,7 +358,7 @@ GlobalRadio 的前端 Vue 单页应用最早借鉴了
 
 ## License
 
-本项目采用 [MIT License](LICENSE)。Copyright (c) 2026 Kang Hao (@akang943578)。
+本项目采用 [MIT License](LICENSE)。Copyright (c) 2026 David Hao (@akang943578)。
 
 > 注：上游 `moli-xia/global-radio` 仓库未声明明确开源协议。本仓库的 MIT License
 > 覆盖本仓库下的全部源代码；如读者希望在商业场景中复用其中明显源自上游的早期
