@@ -1,5 +1,5 @@
 diff --git a/node_modules/@jofr/capacitor-media-session/android/src/main/java/io/github/jofr/capacitor/mediasessionplugin/MediaSessionPlugin.java b/node_modules/@jofr/capacitor-media-session/android/src/main/java/io/github/jofr/capacitor/mediasessionplugin/MediaSessionPlugin.java
-index 6f54b7f..58b6c33 100644
+index 6f54b7f..dfb3ef5 100644
 --- a/node_modules/@jofr/capacitor-media-session/android/src/main/java/io/github/jofr/capacitor/mediasessionplugin/MediaSessionPlugin.java
 +++ b/node_modules/@jofr/capacitor-media-session/android/src/main/java/io/github/jofr/capacitor/mediasessionplugin/MediaSessionPlugin.java
 @@ -82,9 +82,28 @@ public class MediaSessionPlugin extends Plugin {
@@ -63,6 +63,43 @@ index 6f54b7f..58b6c33 100644
          }
  
          int base64Index = url.indexOf(";base64,");
+@@ -127,14 +152,31 @@ public class MediaSessionPlugin extends Plugin {
+         artist = call.getString("artist", artist);
+         album = call.getString("album", album);
+ 
++        // Patched: reset artwork on every setMetadata call. The original code
++        // only updated this.artwork inside the loop, so if JS sent an empty
++        // artwork: [] (e.g. switching to a station with no favicon), the
++        // previous station's bitmap would leak onto the new card. Now an
++        // empty / missing array explicitly clears the artwork.
+         final JSArray artworkArray = call.getArray("artwork");
+-        final List<JSONObject> artworkList = artworkArray.toList();
+-        for (JSONObject artwork : artworkList) {
+-            String src = artwork.getString("src");
+-            if (src != null) {
+-                this.artwork = urlToBitmap(src);
++        Bitmap nextArtwork = null;
++        if (artworkArray != null) {
++            final List<JSONObject> artworkList = artworkArray.toList();
++            for (JSONObject artwork : artworkList) {
++                String src = artwork.optString("src", null);
++                if (src == null || src.isEmpty()) continue;
++                try {
++                    Bitmap bmp = urlToBitmap(src);
++                    if (bmp != null) {
++                        nextArtwork = bmp;
++                        break; // 第一张能解码的就用，剩下的不浪费 CPU
++                    }
++                } catch (Exception e) {
++                    // 单张图解不出来不该把整个 setMetadata 干挂；继续看下一张
++                    Log.d(TAG, "urlToBitmap failed for one artwork entry, skipping", e);
++                }
+             }
+         }
++        this.artwork = nextArtwork;
+ 
+         if (service != null) { updateServiceMetadata(); };
+         call.resolve();
 diff --git a/node_modules/@jofr/capacitor-media-session/android/src/main/java/io/github/jofr/capacitor/mediasessionplugin/MediaSessionService.java b/node_modules/@jofr/capacitor-media-session/android/src/main/java/io/github/jofr/capacitor/mediasessionplugin/MediaSessionService.java
 index cb0417f..3b4d736 100644
 --- a/node_modules/@jofr/capacitor-media-session/android/src/main/java/io/github/jofr/capacitor/mediasessionplugin/MediaSessionService.java

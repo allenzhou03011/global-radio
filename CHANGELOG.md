@@ -2,6 +2,24 @@
 
 所有重要变更都会记录在这里。版本号遵循 [SemVer](https://semver.org/lang/zh-CN/)。
 
+## [2.0.18] - 2026-06-14
+
+### Fixed
+
+- **无 favicon 电台播放后下拉播放卡片显示残留旧封面 / 偶发崩溃** —— 现实里大量电台 `favicon` 字段是空 / null / 404 / CORS 拦 / 非 image MIME / 5MB 巨图 / 单纯指向死域名（emulator 试 *Cadena 100* 的 favicon 是 CloudFront 直接 `403`）。v2.0.17 这条链路只挡了 CORS，剩下的失败路径还是会把已经成功载入过的上一首电台 bitmap 留在 native MediaSession 端，下拉时卡片背景就是错的人。极端情况下还能把 `setMetadata` 调用整个抛出去。
+- 修复（JS 端，`src/stores/player.ts` `fetchArtworkAsBase64`）：
+  - URL 预校验：空串 / 非 `http(s)` / `new URL()` 解不出 hostname → 直接 resolve `null`，根本不发请求；
+  - `AbortController` 3.5s timeout + 多 500ms 软超时 race 兜底，favicon 服务器再烂都不会卡住；
+  - `response.ok` + `content-type: image/*` 双校验，HTML 错误页直接丢；
+  - 512 KB 硬上限，大图直接拒收，省去把 MB 级 base64 string 推过 IPC；
+  - in-session URL 缓存：成功结果 base64 缓存，失败结果也缓存成 `null`，避免同一首死电台被反复重试发起抓图风暴；
+  - 整条管线 `console.debug` 而不是 `console.error`，favicon 抓不到属于常态、不该污染线上日志；
+  - 失败路径走 `MediaSession.setMetadata({ ..., artwork: [] })` 显式空数组，绝不 throw，绝不影响播放本身。
+- 修复（native 端，`patches/@jofr+capacitor-media-session+3.0.3.patch` 给 `MediaSessionPlugin.setMetadata` 加一条 hunk）：
+  - 每次 `setMetadata` 都先把 `this.artwork = null`，循环里只在解出新 bitmap 时才覆盖。原版只在循环内 `this.artwork = urlToBitmap(src)`，JS 这次传 `artwork: []` 时循环 body 不跑，**上一首电台的 bitmap 就被静默留在了 native 端**，下一次 `update()` 会把它 setLargeIcon / putBitmap 进 MediaMetadata，导致下拉卡片背景串到上一首；
+  - 同时把 `urlToBitmap` 单张图解码失败包了 `try/catch`，单张 base64 解坏不影响整个 `setMetadata` resolve。
+- 验证：emulator 实测，无 favicon 电台（Cadena 100，favicon 403）下拉卡片是干净的纯色 MediaStyle 卡片（标题 + 副标题 + 暂停按钮，无图区域）；有 favicon 电台（SmoothJazz.com 64k aac+，favicon 200）下拉是 Android 14 标配的 full-bleed 沉浸式播放卡片。两种情况切换 logcat 全程无 `AndroidRuntime` / `FATAL`。
+
 ## [2.0.17] - 2026-06-14
 
 ### Fixed

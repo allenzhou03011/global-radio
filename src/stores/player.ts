@@ -55,23 +55,38 @@ export const usePlayerStore = defineStore('player', () => {
   // 主线程同步 HttpURLConnection 那条 http(s) 抓图路径关掉了（urlToBitmap
   // 直接返回 null），只保留 base64 解码路径——纯 in-process 不走网络，
   // 不会阻塞 startForeground 5 秒窗口。
-  // 缓存按 URL 命中，电台切回去 / 重连时秒读不再抓一次。
-  const artworkBase64Cache = new Map<string, string>()
-  let inFlightArtwork: { url: string; promise: Promise<string | null> } | null = null
+  // 缓存按 URL 命中，电台切回去 / 重连时秒读不再抓一次（只缓存成功结果）。
+  const artworkBase64Cache = new Map<string, string | null>()
+  const inFlightArtwork = new Map<string, Promise<string | null>>()
 
-  const ARTWORK_FETCH_TIMEOUT_MS = 4000
-  const ARTWORK_MAX_BYTES = 256 * 1024 // 256 KB 上限，太大没必要也增加 IPC 压力
+  const ARTWORK_FETCH_TIMEOUT_MS = 3500
+  const ARTWORK_MAX_BYTES = 512 * 1024 // 512 KB hard cap
 
-  const fetchArtworkAsBase64 = async (url: string): Promise<string | null> => {
-    if (!url || typeof url !== 'string') return null
-    if (!/^https?:\/\//i.test(url)) return null
-
-    const cached = artworkBase64Cache.get(url)
-    if (cached !== undefined) return cached
-
-    if (inFlightArtwork && inFlightArtwork.url === url) {
-      return inFlightArtwork.promise
+  const isUsableFaviconUrl = (raw: unknown): raw is string => {
+    if (!raw || typeof raw !== 'string') return false
+    const trimmed = raw.trim()
+    if (!trimmed) return false
+    if (!/^https?:\/\//i.test(trimmed)) return false
+    try {
+      const u = new URL(trimmed)
+      if (!u.hostname) return false
+    } catch {
+      return false
     }
+    return true
+  }
+
+  const fetchArtworkAsBase64 = async (rawUrl: string): Promise<string | null> => {
+    if (!isUsableFaviconUrl(rawUrl)) return null
+    const url = rawUrl.trim()
+
+    if (artworkBase64Cache.has(url)) {
+      // 命中缓存（命中值可能是 null = 之前抓失败了，本会话不再重试，避免抓图风暴）
+      return artworkBase64Cache.get(url) ?? null
+    }
+
+    const existing = inFlightArtwork.get(url)
+    if (existing) return existing
 
     const promise = (async (): Promise<string | null> => {
       try {
@@ -103,11 +118,12 @@ export const usePlayerStore = defineStore('player', () => {
             ? contentType.split(';')[0].trim()
             : 'image/png'
 
-          // native 返回值是 base64 string；web 路径上面已经分开了
+          // native 返回值是 base64 string
           const base64 = typeof response.data === 'string' ? response.data : null
           if (!base64) return null
           // 粗略大小判断：base64 字符数 * 0.75 ≈ 字节数
           if (base64.length * 0.75 > ARTWORK_MAX_BYTES) return null
+
           return `data:${mime};base64,${base64}`
         }
 
@@ -140,20 +156,24 @@ export const usePlayerStore = defineStore('player', () => {
           clearTimeout(timeoutId)
         }
       } catch (err) {
-        console.warn('[mediaSession] artwork fetch failed:', err)
+        // 故意 debug 而不是 warn / error —— 拉不到电台 favicon 是常态
+        // （404 / CORS / 域名挂了 / favicon 字段是垃圾 URL），不该污染控制台
+        console.debug('[mediaSession] artwork fetch failed:', err)
         return null
       }
     })()
 
-    inFlightArtwork = { url, promise }
+    inFlightArtwork.set(url, promise)
     try {
       const dataUri = await promise
-      artworkBase64Cache.set(url, dataUri || '')
+      artworkBase64Cache.set(url, dataUri)
       return dataUri
+    } catch {
+      // 防御性：上面的 IIFE 已经吞掉了 throw，这里基本走不到
+      artworkBase64Cache.set(url, null)
+      return null
     } finally {
-      if (inFlightArtwork && inFlightArtwork.url === url) {
-        inFlightArtwork = null
-      }
+      inFlightArtwork.delete(url)
     }
   }
 
@@ -166,17 +186,21 @@ export const usePlayerStore = defineStore('player', () => {
       album: station.tags || 'Radio'
     }
 
-    // 第一帧：不带 artwork 立刻把大卡片贴出来，绝对不阻塞 startForeground 5s 窗口
+    // 第一帧：不带 artwork（显式空数组）立刻把大卡片贴出来，绝对不阻塞 startForeground 5s 窗口。
+    // 显式 artwork: [] 很重要 —— patched 的 native plugin 会读 length，
+    // 这一帧也顺便把上一首电台残留在 native 端的 bitmap 清掉
     try {
       await MediaSession.setMetadata({ ...baseMetadata, artwork: [] })
     } catch (error) {
-      console.warn('[mediaSession] setMetadata (no artwork) failed:', error)
+      console.debug('[mediaSession] setMetadata (no artwork) failed:', error)
     }
 
     // 第二帧：异步抓取 favicon -> base64 data URI，回来再 setMetadata 一次。
-    // 走 cache，电台切回去秒读。失败了就保持没图状态，不影响卡片本身。
+    // 如果 favicon 字段缺失 / 非 http(s) / 抓失败 / CORS / 超时 / 太大 /
+    // 非 image MIME，整个第二帧静默跳过，第一帧设的"无图卡片"就是最终样子，
+    // 绝不影响播放本身。
     const faviconUrl = station.favicon
-    if (!faviconUrl) return
+    if (!isUsableFaviconUrl(faviconUrl)) return
 
     const announceStation = station
     fetchArtworkAsBase64(faviconUrl)
@@ -184,17 +208,18 @@ export const usePlayerStore = defineStore('player', () => {
         if (!dataUri) return
         // 用户已经切到别的电台了就不要覆盖当前 metadata
         if (currentStation.value?.stationuuid !== announceStation.stationuuid) return
+        const mimeMatch = dataUri.slice(5, dataUri.indexOf(';'))
         try {
           await MediaSession.setMetadata({
             ...baseMetadata,
-            artwork: [{ src: dataUri, sizes: '512x512', type: dataUri.slice(5, dataUri.indexOf(';')) || 'image/png' }]
+            artwork: [{ src: dataUri, sizes: '512x512', type: mimeMatch || 'image/png' }]
           })
         } catch (err) {
-          console.warn('[mediaSession] setMetadata (with artwork) failed:', err)
+          console.debug('[mediaSession] setMetadata (with artwork) failed:', err)
         }
       })
       .catch((err) => {
-        console.warn('[mediaSession] artwork pipeline failed:', err)
+        console.debug('[mediaSession] artwork pipeline failed:', err)
       })
   }
 
