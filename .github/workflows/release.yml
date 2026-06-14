@@ -200,21 +200,51 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           TAG="${{ steps.tag.outputs.tag }}"
+          VERSION="${TAG#v}"
           ls -la release/
-          BODY=$(cat <<'EOF'
-          提供 Windows 64 位、iPhone、Android 客户端。
-          如出现异常，请清除应用缓存即可。
 
-          包含多用户登录、服务端数据同步、HLS 流代理、三端原生壳与完整 CI/CD 流程。
+          # Pull the matching section out of CHANGELOG.md, matching "## [VERSION]"
+          # through to (but not including) the next "## [" header.
+          CHANGELOG_SECTION=""
+          if [ -f CHANGELOG.md ]; then
+            CHANGELOG_SECTION=$(awk -v ver="$VERSION" '
+              BEGIN { found=0 }
+              $0 ~ "^## \\[" ver "\\]" { found=1; print; next }
+              found && /^## \[/ { exit }
+              found { print }
+            ' CHANGELOG.md)
+          fi
 
-          ## Assets
-          - `GlobalRadio-v<version>.apk` — Android release APK (shell mode)
-          - `GlobalRadio-<version>.ipa` — iOS unsigned IPA (sideload only; not App Store signed)
-          - `GlobalRadio_<version>_x64-setup.exe` — Windows 64-bit installer (Electron NSIS)
-          EOF
-          )
+          # Fallback if we cant find the version in CHANGELOG (e.g. someone
+          # forgot to update it before tagging).
+          if [ -z "$CHANGELOG_SECTION" ]; then
+            CHANGELOG_SECTION="(未找到 \`CHANGELOG.md\` 中对应 \`$VERSION\` 的条目，请补充。)"
+          fi
+
+          BODY=$(cat <<EOF
+$CHANGELOG_SECTION
+
+---
+
+提供 Windows 64 位 / iPhone / Android 客户端，如有异常请清除应用缓存重试。
+
+### 下载
+- \`GlobalRadio-v${VERSION}.apk\` — Android release APK (shell mode)
+- \`GlobalRadio-${VERSION}.ipa\` — iOS unsigned IPA (sideload only; 未签名 App Store)
+- \`GlobalRadio_${VERSION}_x64-setup.exe\` — Windows 64-bit installer (Electron NSIS)
+
+完整变更历史详见 [CHANGELOG.md](https://github.com/${GITHUB_REPOSITORY}/blob/main/CHANGELOG.md)。
+EOF
+)
+          echo "--- Release notes preview ---"
+          echo "$BODY"
+          echo "--- End preview ---"
+
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" release/* --clobber
+            # Refresh notes too in case CHANGELOG was updated since the
+            # release was first published (e.g. re-running the workflow).
+            gh release edit "$TAG" --notes "$BODY"
           else
             gh release create "$TAG" release/* \
               --title "各平台客户端 $TAG" \
