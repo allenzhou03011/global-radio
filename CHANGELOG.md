@@ -2,6 +2,18 @@
 
 所有重要变更都会记录在这里。版本号遵循 [SemVer](https://semver.org/lang/zh-CN/)。
 
+## [2.0.15] - 2026-06-14
+
+### Fixed
+
+- **媒体大卡片 + Playback channel 真正修复**（v2.0.13/v2.0.14 都没修干净）—— 之前两版只改 JS 端（不传 artwork），但 PWA SW 可能还在缓存老 bundle，且 `@jofr/capacitor-media-session` 的 Java 实现自身还有两个独立的 race condition。这次用 [patch-package](https://github.com/ds300/patch-package) 直接给 `@jofr` 的 native 代码打补丁（patch 进 APK，跟 PWA 版本无关）：
+  - **`MediaSessionPlugin.urlToBitmap`**：原版会在主线程同步 `HttpURLConnection.connect()` 抓 http(s) artwork，无超时，favicon 一卡就把整个 `setMetadata` 干挂。Patched 直接 `return null` 跳过 http 路径（base64 data URI 仍然支持，因为是纯解码不走网络）。
+  - **`MediaSessionService.onCreate`**：新增——立刻创建 `Playback` notification channel，保证用户首次启动 app 时系统通知设置里就能看到这个 channel（不再依赖 `connectAndInitialize` 成功跑完）。
+  - **`MediaSessionService.onStartCommand`**：新增 `ensureForegroundStarted()`，**立刻**调 `startForeground()` 贴一张占位 notification。Android 14 给 service 只有 5 秒窗口从 `startForegroundService()` 到 `startForeground()`，原版要等 `bindService` → `onServiceConnected` → `connectAndInitialize` 这条异步链才调用，在慢设备/MIUI 上很容易超时被系统干掉。
+  - **`MediaSessionService.connectAndInitialize`**：如果 `ensureForegroundStarted` 已经贴过占位通知，这里改用 `notify()` 把它替换成带 MediaStyle 的真大卡片，不再重复 `startForeground`。
+  - **`MediaSessionPlugin.startMediaService`**：给 `startForegroundService` / `bindService` 加 try-catch，`ForegroundServiceStartNotAllowedException` 走 `startService()` 降级，不会再让一个 exception 把整个播放动作弄崩。
+- 用 patch-package 的好处：`npm install` 时通过 postinstall 钩子自动 apply，CI 也能用，patch 文件在 `patches/` 目录跟代码一起入库。
+
 ## [2.0.14] - 2026-06-14
 
 ### Fixed

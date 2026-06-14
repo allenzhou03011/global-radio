@@ -1,0 +1,186 @@
+diff --git a/node_modules/@jofr/capacitor-media-session/android/src/main/java/io/github/jofr/capacitor/mediasessionplugin/MediaSessionPlugin.java b/node_modules/@jofr/capacitor-media-session/android/src/main/java/io/github/jofr/capacitor/mediasessionplugin/MediaSessionPlugin.java
+index 6f54b7f..58b6c33 100644
+--- a/node_modules/@jofr/capacitor-media-session/android/src/main/java/io/github/jofr/capacitor/mediasessionplugin/MediaSessionPlugin.java
++++ b/node_modules/@jofr/capacitor-media-session/android/src/main/java/io/github/jofr/capacitor/mediasessionplugin/MediaSessionPlugin.java
+@@ -82,9 +82,28 @@ public class MediaSessionPlugin extends Plugin {
+     }
+ 
+     public void startMediaService() {
++        // Patched: wrap in try/catch. Android 14 can throw
++        // ForegroundServiceStartNotAllowedException if the app is briefly
++        // considered "not in foreground" (e.g. WebView still transitioning),
++        // and the original code would let the exception escape and kill the
++        // play action entirely.
+         Intent intent = new Intent(getActivity(), MediaSessionService.class);
+-        ContextCompat.startForegroundService(getContext(), intent);
+-        getContext().bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE);
++        try {
++            ContextCompat.startForegroundService(getContext(), intent);
++        } catch (Exception e) {
++            Log.w(TAG, "startForegroundService failed, falling back to startService", e);
++            try {
++                getContext().startService(intent);
++            } catch (Exception ignored) {
++                Log.w(TAG, "startService also failed", ignored);
++                return;
++            }
++        }
++        try {
++            getContext().bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE);
++        } catch (Exception e) {
++            Log.w(TAG, "bindService failed", e);
++        }
+     }
+ 
+     private void updateServiceMetadata() {
+@@ -97,6 +116,15 @@ public class MediaSessionPlugin extends Plugin {
+ 
+ 
+     private Bitmap urlToBitmap(String url) throws IOException {
++        // Patched: ABORT for http(s) URLs. The original implementation does a
++        // *synchronous* HttpURLConnection.connect() on the main thread with no
++        // timeout, which freezes the bridge call (and thus the @PluginMethod)
++        // for as long as the favicon server takes — potentially forever.
++        // When that times out / throws, setMetadata propagates the IOException
++        // back to JS, the follow-up setPlaybackState lands too late for
++        // Android 14's startForeground window, and the MediaStyle card never
++        // appears in the shade. We disable the http path here; base64 data
++        // URIs are still supported (no network, decodes in-process).
+         final boolean blobUrl = url.startsWith("blob:");
+         if (blobUrl) {
+             Log.i(TAG, "Converting Blob URLs to Bitmap for media artwork is not yet supported");
+@@ -104,11 +132,8 @@ public class MediaSessionPlugin extends Plugin {
+ 
+         final boolean httpUrl = url.startsWith("http");
+         if (httpUrl) {
+-            HttpURLConnection connection = (HttpURLConnection) (new URL(url)).openConnection();
+-            connection.setDoInput(true);
+-            connection.connect();
+-            InputStream inputStream = connection.getInputStream();
+-            return BitmapFactory.decodeStream(inputStream);
++            Log.i(TAG, "Skipping http(s) artwork fetch (patched to avoid main-thread sync IO)");
++            return null;
+         }
+ 
+         int base64Index = url.indexOf(";base64,");
+diff --git a/node_modules/@jofr/capacitor-media-session/android/src/main/java/io/github/jofr/capacitor/mediasessionplugin/MediaSessionService.java b/node_modules/@jofr/capacitor-media-session/android/src/main/java/io/github/jofr/capacitor/mediasessionplugin/MediaSessionService.java
+index cb0417f..dc307b4 100644
+--- a/node_modules/@jofr/capacitor-media-session/android/src/main/java/io/github/jofr/capacitor/mediasessionplugin/MediaSessionService.java
++++ b/node_modules/@jofr/capacitor-media-session/android/src/main/java/io/github/jofr/capacitor/mediasessionplugin/MediaSessionService.java
+@@ -60,6 +60,7 @@ public class MediaSessionService extends Service {
+     private MediaSessionCallback callback;
+ 
+     private final IBinder binder = new LocalBinder();
++    private boolean foregroundStarted = false;
+ 
+     public final class LocalBinder extends Binder {
+         MediaSessionService getService() {
+@@ -79,6 +80,51 @@ public class MediaSessionService extends Service {
+         return super.onUnbind(intent);
+     }
+ 
++    @Override
++    public void onCreate() {
++        super.onCreate();
++        // Pre-create the notification channel so it shows up in the system
++        // notification settings the moment the service starts, regardless of
++        // whether connectAndInitialize() has had a chance to run.
++        notificationManager = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
++        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && notificationManager != null) {
++            NotificationChannel channel = new NotificationChannel(
++                "playback", "Playback", NotificationManager.IMPORTANCE_LOW);
++            notificationManager.createNotificationChannel(channel);
++        }
++    }
++
++    /**
++     * Patched: call startForeground immediately in onStartCommand with a
++     * placeholder notification. Android 14 (API 34) gives a service only
++     * 5 seconds from startForegroundService() to startForeground(),
++     * otherwise throws ForegroundServiceDidNotStartInTimeException. The
++     * original code relied on connectAndInitialize() (triggered by
++     * bindService → onServiceConnected) to call startForeground, which
++     * can lose the race on slow devices or under load.
++     */
++    private void ensureForegroundStarted() {
++        if (foregroundStarted) return;
++        try {
++            NotificationCompat.Builder placeholderBuilder =
++                new NotificationCompat.Builder(this, "playback")
++                    .setSmallIcon(R.drawable.ic_baseline_volume_up_24)
++                    .setContentTitle("Playback")
++                    .setOngoing(true)
++                    .setVisibility(NotificationCompat.VISIBILITY_PUBLIC);
++            Notification placeholder = placeholderBuilder.build();
++            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
++                startForeground(NOTIFICATION_ID, placeholder,
++                    ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK);
++            } else {
++                startForeground(NOTIFICATION_ID, placeholder);
++            }
++            foregroundStarted = true;
++        } catch (Exception e) {
++            Log.w(TAG, "ensureForegroundStarted failed", e);
++        }
++    }
++
+     public void connectAndInitialize(MediaSessionPlugin plugin, Intent intent) {
+         this.plugin = plugin;
+ 
+@@ -95,10 +141,10 @@ public class MediaSessionService extends Service {
+                 .putLong(MediaMetadataCompat.METADATA_KEY_DURATION, duration);
+         mediaSession.setMetadata(mediaMetadataBuilder.build());
+ 
+-        notificationManager = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
+-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+-            NotificationChannel channel = new NotificationChannel("playback", "Playback", NotificationManager.IMPORTANCE_LOW);
+-            notificationManager.createNotificationChannel(channel);
++        // Patched: notificationManager + channel are now created in onCreate(),
++        // so they are guaranteed to exist before any startForeground call.
++        if (notificationManager == null) {
++            notificationManager = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
+         }
+ 
+         notificationStyle = new MediaStyle().setMediaSession(mediaSession.getSessionToken());
+@@ -108,10 +154,20 @@ public class MediaSessionService extends Service {
+                 .setContentIntent(PendingIntent.getActivity(getApplicationContext(), 0, intent, PendingIntent.FLAG_IMMUTABLE))
+                 .setVisibility(NotificationCompat.VISIBILITY_PUBLIC);
+ 
+-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+-          startForeground(NOTIFICATION_ID, notificationBuilder.build(), ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK);
++        // Patched: in case ensureForegroundStarted() wasn't called yet
++        // (defensive), still call startForeground here. Otherwise just
++        // post/update via notify() since we're already foreground.
++        if (!foregroundStarted) {
++            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
++                startForeground(NOTIFICATION_ID, notificationBuilder.build(),
++                    ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK);
++            } else {
++                startForeground(NOTIFICATION_ID, notificationBuilder.build());
++            }
++            foregroundStarted = true;
+         } else {
+-          startForeground(NOTIFICATION_ID, notificationBuilder.build());
++            // Replace the placeholder with the real MediaStyle notification
++            notificationManager.notify(NOTIFICATION_ID, notificationBuilder.build());
+         }
+ 
+         notificationActions.put("play", new NotificationCompat.Action(
+@@ -153,7 +209,16 @@ public class MediaSessionService extends Service {
+ 
+     @Override
+     public int onStartCommand(Intent intent, int flags, int startId) {
+-        MediaButtonReceiver.handleIntent(mediaSession, intent);
++        // Patched: call startForeground IMMEDIATELY to satisfy Android 14's
++        // 5-second startForegroundService → startForeground window. The
++        // original code only called startForeground from connectAndInitialize,
++        // which is triggered asynchronously via bindService → onServiceConnected
++        // and could lose the race, killing the service before any media
++        // notification was posted.
++        ensureForegroundStarted();
++        if (mediaSession != null) {
++            MediaButtonReceiver.handleIntent(mediaSession, intent);
++        }
+         return super.onStartCommand(intent, flags, startId);
+     }
+ 
