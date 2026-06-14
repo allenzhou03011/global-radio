@@ -2,6 +2,16 @@
 
 所有重要变更都会记录在这里。版本号遵循 [SemVer](https://semver.org/lang/zh-CN/)。
 
+## [2.0.6] - 2026-06-14
+
+### Changed
+
+- **Android `targetSdkVersion` 33 → 34**：去掉 HyperOS / 新版 MIUI 安装时"为老版本 Android 系统开发"的警告
+- `compileSdkVersion` 33 → 34
+- AGP 8.0.0 → 8.1.4
+- GitHub Actions 工作流安装 `platforms;android-34 build-tools;34.0.0`
+- 已在本地 `./gradlew assembleDebug` 验证编译通过
+
 ## [2.0.5] - 2026-06-14
 
 ### Fixed
