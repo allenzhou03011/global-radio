@@ -221,3 +221,44 @@ jobs:
               --notes "$BODY" \
               --latest
           fi
+
+      - name: Prune old releases (keep latest 2)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          KEEP_RELEASES: '2'
+        run: |
+          set -e
+          CURRENT_TAG="${{ steps.tag.outputs.tag }}"
+          echo "Keeping latest $KEEP_RELEASES releases. Current published tag: $CURRENT_TAG"
+          echo ""
+          echo "All releases (newest first, by publishedAt):"
+          gh release list --repo "$GITHUB_REPOSITORY" --limit 100 --json tagName,publishedAt,isLatest \
+            | jq -r 'sort_by(.publishedAt) | reverse | .[] | "  \(.tagName)\t\(.publishedAt)\t\(if .isLatest then "(latest)" else "" end)"'
+          echo ""
+
+          # Releases beyond the newest KEEP_RELEASES — sorted by publishedAt desc,
+          # then dropped first KEEP_RELEASES, then exclude the just-published tag
+          # as a safety belt in case timestamps look weird.
+          TO_DELETE=$(gh release list --repo "$GITHUB_REPOSITORY" --limit 100 --json tagName,publishedAt \
+            | jq -r --argjson keep "$KEEP_RELEASES" --arg current "$CURRENT_TAG" \
+                'sort_by(.publishedAt) | reverse | .[$keep:] | .[].tagName | select(. != $current)')
+
+          if [ -z "$TO_DELETE" ]; then
+            echo "Nothing to prune."
+            exit 0
+          fi
+
+          echo "Will delete the following releases (associated git tags will be preserved):"
+          echo "$TO_DELETE" | sed 's/^/  - /'
+          echo ""
+
+          while IFS= read -r tag; do
+            [ -z "$tag" ] && continue
+            echo "Deleting release $tag ..."
+            # gh release delete does NOT remove the git tag unless --cleanup-tag is passed.
+            gh release delete "$tag" --repo "$GITHUB_REPOSITORY" --yes
+          done <<< "$TO_DELETE"
+
+          echo ""
+          echo "Done. Remaining releases:"
+          gh release list --repo "$GITHUB_REPOSITORY" --limit 10
