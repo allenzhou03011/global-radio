@@ -192,6 +192,57 @@
         </div>
       </section>
 
+      <!-- 播放与网络 / Playback & Network -->
+      <section class="ios-card p-4">
+        <h2 class="text-lg font-semibold text-ios-dark-gray dark:text-dark-text mb-4">{{ t('settings.playbackNetwork') }}</h2>
+
+        <div class="space-y-5">
+          <div>
+            <div class="flex items-center justify-between mb-1">
+              <label class="text-sm font-medium text-ios-dark-gray dark:text-dark-text">{{ t('settings.failoverTimeout') }}</label>
+              <span class="text-sm font-semibold text-ios-blue tabular-nums">{{ playbackSettingsStore.failoverTimeoutSec }}{{ t('settings.failoverTimeoutUnit') }}</span>
+            </div>
+            <p class="text-xs text-ios-gray dark:text-dark-secondary mb-2">{{ t('settings.failoverTimeoutHint') }}</p>
+            <input
+              type="range"
+              :min="playbackSettingsStore.MIN_TIMEOUT_SEC"
+              :max="playbackSettingsStore.MAX_TIMEOUT_SEC"
+              step="1"
+              :value="playbackSettingsStore.failoverTimeoutSec"
+              @input="onFailoverTimeoutInput"
+              class="w-full accent-ios-blue"
+            />
+            <div class="flex justify-between text-xs text-ios-gray dark:text-dark-secondary mt-1">
+              <span>{{ playbackSettingsStore.MIN_TIMEOUT_SEC }}{{ t('settings.failoverTimeoutUnit') }}</span>
+              <span>{{ playbackSettingsStore.MAX_TIMEOUT_SEC }}{{ t('settings.failoverTimeoutUnit') }}</span>
+            </div>
+          </div>
+
+          <div class="flex items-start justify-between gap-4">
+            <div class="flex-1">
+              <p class="text-sm font-medium text-ios-dark-gray dark:text-dark-text">{{ t('settings.forceProxy') }}</p>
+              <p class="text-xs text-ios-gray dark:text-dark-secondary mt-1">{{ t('settings.forceProxyHint') }}</p>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              :aria-checked="playbackSettingsStore.forceProxy ? 'true' : 'false'"
+              @click="playbackSettingsStore.toggleForceProxy()"
+              :style="{
+                backgroundColor: playbackSettingsStore.forceProxy ? '#007AFF' : '#C7C7CC'
+              }"
+              class="relative inline-flex h-7 w-12 shrink-0 items-center rounded-full transition-colors focus:outline-none"
+            >
+              <span class="sr-only">{{ playbackSettingsStore.forceProxy ? t('settings.enabled') : t('settings.disabled') }}</span>
+              <span
+                class="inline-block h-6 w-6 transform rounded-full bg-white shadow transition-transform"
+                :class="playbackSettingsStore.forceProxy ? 'translate-x-5' : 'translate-x-0.5'"
+              />
+            </button>
+          </div>
+        </div>
+      </section>
+
       <section class="ios-card p-4">
         <h2 class="text-lg font-semibold text-ios-dark-gray dark:text-dark-text mb-4">{{ t('settings.aboutApp') }}</h2>
         
@@ -228,6 +279,7 @@ import { computed, ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import axios from 'axios'
 import { usePlayerStore } from '@/stores/player'
+import { usePlaybackSettingsStore } from '@/stores/playbackSettings'
 import { useLanguageStore } from '@/stores/language'
 import { useToastStore } from '@/stores/toast'
 import { useAuthStore } from '@/stores/auth'
@@ -239,6 +291,7 @@ import {
 } from '@heroicons/vue/24/outline'
 
 const playerStore = usePlayerStore()
+const playbackSettingsStore = usePlaybackSettingsStore()
 const authStore = useAuthStore()
 const router = useRouter()
 const { t } = useLanguageStore()
@@ -267,6 +320,11 @@ const sleepTimerOptions = computed(() => [
 const setVolume = (event: Event) => {
   const target = event.target as HTMLInputElement
   playerStore.setVolume(parseFloat(target.value))
+}
+
+const onFailoverTimeoutInput = (event: Event) => {
+  const target = event.target as HTMLInputElement
+  playbackSettingsStore.setFailoverTimeoutSec(parseInt(target.value, 10))
 }
 
 const setSleepTimer = (minutes: number) => {

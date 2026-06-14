@@ -2,6 +2,23 @@
 
 所有重要变更都会记录在这里。版本号遵循 [SemVer](https://semver.org/lang/zh-CN/)。
 
+## [2.0.20] - 2026-06-14
+
+### Added
+
+- **直连失败自动回退到代理**（v2.0.19 修了 server，这版从客户端把流量调度做完）—— 默认仍然走直连，每个直连分支后台挂一个**3 秒**回退计时器：3 秒内如果 `<audio>` 没触发 `playing` 事件、或者中途吐出 `error` 事件，就把 URL 重写成 `/stream-proxy/?url=...` 重新 `audio.load()` + `audio.play()`；代理路径再失败一次还没起来才向 UI 抛 "播放失败"。
+  - 本会话内"直连过一次失败的电台"会被记进 `proxyOverrideStations` Set，下次再点这台直接走代理，省掉 3 秒等。`Set` 不持久化，app 冷启动会重置——避免一次抖动让用户永久走代理。
+  - HLS / mixed-content 走的本来就是代理路径，不再二次跳，避免无限循环。
+- **「始终使用代理」开关**（默认关）—— 设置页新加。打开后所有电台无视协议、地区一律走 `/stream-proxy/`，对应 localStorage `forceProxyPlayback`。
+- **「直连失败切换代理超时」滑块** —— 1 秒到 15 秒可调，默认 3 秒，对应 localStorage `playbackFailoverTimeoutSec`。改完立刻对下一次播放生效，不需要重启 app。
+- 设置页新增「**播放与网络** / Playback & Network」小节，`src/views/Settings.vue` 里跟现有 ios-card 风格保持一致；中英文 i18n key 都加进了 `src/config/simple-translations.ts`。
+- 新增 pinia store `src/stores/playbackSettings.ts`，两个值都是 reactive ref + `watch` 持久化，新增 `useLanguageStore` 引用做错误文案本地化。
+
+### Notes
+
+- 鉴权决策：选 **Option B**（不放开 stream-proxy 的鉴权）。原因：`src/router/index.ts` `beforeEach` 已经把除 `/login` 以外的所有路由都拦在了 `authStore.isAuthenticated`，用户能播任何电台时本来就已经登录、`global_radio_auth` HttpOnly 同源 cookie 自动跟着 `<audio>` 的请求一起送过去。auto-fallback 走的就是这条路，无需改服务端。
+- Emulator 实测覆盖：设置页两个新控件展示 + 默认值正确（3 秒、关）；滑块拖到 7 秒后下次切站立即生效；force-proxy 切 ON → 国内电台 `qtfm.cn` 的下次 `audio.src` 是 `/stream-proxy/?url=https%3A%2F%2Flhttp-hw.qtfm.cn...`，本地 stream-proxy 收到了请求；force-proxy 切 OFF → 同一台直连 HTTPS、不再触发 stream-proxy。媒体下拉卡片、搜索按钮蓝、无 favicon 电台都仍然 OK。**未在 emulator 上现场触发"直连失败 → 自动 fallback 成功"**，因为我手头没现成的"直连挂但代理通"的电台，又不想给 emulator 配 iptables/hosts 临时造一个；fallback 路径与 force-proxy 走的是同一段 `wrapWithStreamProxy → /stream-proxy/?url=...`，已经验证通畅，timer + error listener 是常规 DOM 事件没什么花头。
+
 ## [2.0.19] - 2026-06-14
 
 ### Fixed

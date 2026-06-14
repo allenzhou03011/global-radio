@@ -172,9 +172,17 @@ export const createSimpleTranslations = (): Record<SupportedLanguage, any> => {
         step2Content: 'System Settings → Battery → Battery Optimization → Global Radio → Don\'t optimize',
         setupComplete: 'After completing the setup, you can enjoy stable background radio playback',
         permissionManagement: 'Permission Management',
-        permissionInfo: 'The app requires some permissions to provide full functionality',
-        permissionHint: 'You can manage app permissions in system settings',
-        batteryOptimizationHint: 'To avoid background playback interruptions, it is recommended to disable battery optimization for this app'
+      permissionInfo: 'The app requires some permissions to provide full functionality',
+      permissionHint: 'You can manage app permissions in system settings',
+      batteryOptimizationHint: 'To avoid background playback interruptions, it is recommended to disable battery optimization for this app',
+      playbackNetwork: 'Playback & Network',
+      failoverTimeout: 'Failover timeout',
+      failoverTimeoutHint: 'Seconds before falling back to the server proxy after a direct stream fails.',
+      failoverTimeoutUnit: 's',
+      forceProxy: 'Always use proxy',
+      forceProxyHint: 'Route every station through the server proxy (uses more bandwidth, can bypass network issues).',
+      enabled: 'On',
+      disabled: 'Off'
     },
     player: {
       play: 'Play',
@@ -403,7 +411,15 @@ export const createSimpleTranslations = (): Record<SupportedLanguage, any> => {
         permissionManagement: '权限管理',
         permissionInfo: '应用需要一些权限来提供完整功能',
         permissionHint: '您可以在系统设置中管理应用权限',
-        batteryOptimizationHint: '为避免后台播放中断，建议关闭本应用的电池优化功能'
+        batteryOptimizationHint: '为避免后台播放中断，建议关闭本应用的电池优化功能',
+        playbackNetwork: '播放与网络',
+        failoverTimeout: '直连失败切换代理超时',
+        failoverTimeoutHint: '直连失败后多久切到代理（秒）',
+        failoverTimeoutUnit: '秒',
+        forceProxy: '始终使用代理',
+        forceProxyHint: '所有电台都走服务器代理（耗带宽，但能绕过部分网络问题）',
+        enabled: '开启',
+        disabled: '关闭'
       },
       player: {
         play: '播放',

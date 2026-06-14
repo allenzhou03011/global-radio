@@ -3,9 +3,18 @@ import { ref, computed, nextTick } from 'vue'
 import Hls from 'hls.js'
 import type { RadioStation, PlayerState, FavoriteStation } from '@/types/radio'
 import { useHistoryStore } from './history'
+import { useLanguageStore } from './language'
+import { usePlaybackSettingsStore } from './playbackSettings'
 import { mediaSessionManager } from '@/utils/mediaSession'
 import { deviceOptimization } from '@/utils/deviceOptimization'
-import { isHlsStream, resolveStreamUrl, supportsNativeHls } from '@/utils/streamUrl'
+import {
+  isHlsStream,
+  resolveStreamUrl,
+  supportsNativeHls,
+  upgradeToHttpsIfNeeded,
+  wrapWithStreamProxy,
+  isProxiedStreamUrl
+} from '@/utils/streamUrl'
 import { Capacitor, CapacitorHttp } from '@capacitor/core'
 import { MediaSession } from '@jofr/capacitor-media-session'
 import { startBackgroundAudio, stopBackgroundAudio } from '@/utils/backgroundAudio'
@@ -34,6 +43,16 @@ export const usePlayerStore = defineStore('player', () => {
   const playbackIntent = ref<'playing' | 'paused' | 'stopped'>('stopped')
   let pauseRecoveryAttempts = 0
   let pauseRecoveryResetTimer: ReturnType<typeof setTimeout> | null = null
+
+  // Stations that needed the proxy at least once during this session. Reset on
+  // app cold start so a transient network blip doesn't permanently route the
+  // user through the (more expensive) proxy. Keyed by stationuuid.
+  const proxyOverrideStations = ref<Set<string>>(new Set())
+
+  // Holds a cancel callback for the auto-fallback machinery so we can tear it
+  // down when the user switches stations / pauses / stops before the timer
+  // fires.
+  let cancelAutoFallback: (() => void) | null = null
 
   const noteRecoveryAttempt = () => {
     pauseRecoveryAttempts++
@@ -297,6 +316,192 @@ export const usePlayerStore = defineStore('player', () => {
     await audio.value.play()
   }
 
+  // Pick the actual URL to hand to the audio element. Adds the per-session
+  // proxy override and the user-toggled "force proxy" setting on top of the
+  // baseline `resolveStreamUrl` rules (HLS / mixed-content already proxied).
+  const buildPlaybackUrl = (
+    station: RadioStation
+  ): { streamUrl: string; originalUrl: string; forcedThroughProxy: boolean } => {
+    const settings = usePlaybackSettingsStore()
+    const rawUrl = (station.url_resolved || station.url || '').trim()
+    const originalUrl = upgradeToHttpsIfNeeded(rawUrl)
+
+    let streamUrl = resolveStreamUrl(station)
+    let forcedThroughProxy = false
+
+    // If the user has flipped "always use proxy" or this station already
+    // failed direct earlier in this session, route through proxy regardless of
+    // the default rules, except when it's already proxied (HLS / mixed
+    // content).
+    const needsForcedProxy =
+      settings.forceProxy || proxyOverrideStations.value.has(station.stationuuid)
+
+    if (needsForcedProxy && !isProxiedStreamUrl(streamUrl)) {
+      streamUrl = wrapWithStreamProxy(originalUrl)
+      forcedThroughProxy = true
+    }
+
+    return { streamUrl, originalUrl, forcedThroughProxy }
+  }
+
+  // Tear down any pending fallback timer + listeners. Safe to call repeatedly.
+  const clearAutoFallback = () => {
+    if (cancelAutoFallback) {
+      const fn = cancelAutoFallback
+      cancelAutoFallback = null
+      try {
+        fn()
+      } catch (err) {
+        console.debug('[playback] cancelAutoFallback threw:', err)
+      }
+    }
+  }
+
+  // After we kick off direct playback, watch the audio element. If it fails
+  // (`error`) or never gets to `playing` within the user-configured threshold,
+  // rebuild the URL through the server proxy and retry. If THAT also fails
+  // within another threshold window, surface a hard error to the UI.
+  const scheduleAutoFallback = (
+    station: RadioStation,
+    originalUrl: string,
+    thresholdMs: number
+  ) => {
+    clearAutoFallback()
+    if (!audio.value) return
+
+    const targetAudio = audio.value
+    let triggered = false
+
+    const trigger = (reason: string) => {
+      if (triggered) return
+      triggered = true
+      clearAutoFallback()
+      console.warn(
+        `[playback] auto-fallback for "${station.name}" (${station.stationuuid}): ${reason}`
+      )
+      void runProxyFallback(station, originalUrl, thresholdMs)
+    }
+
+    const onPlaying = () => {
+      // First successful frame — we're good. Cancel everything.
+      clearAutoFallback()
+    }
+    const onError = () => {
+      trigger('audio element fired error')
+    }
+
+    targetAudio.addEventListener('playing', onPlaying, { once: true })
+    targetAudio.addEventListener('error', onError, { once: true })
+
+    const timer = setTimeout(() => {
+      if (targetAudio.readyState >= 3) {
+        // Audio is actually playing-ready (HAVE_FUTURE_DATA). Keep it.
+        clearAutoFallback()
+        return
+      }
+      trigger(`no 'playing' event within ${thresholdMs}ms`)
+    }, thresholdMs)
+
+    cancelAutoFallback = () => {
+      clearTimeout(timer)
+      targetAudio.removeEventListener('playing', onPlaying)
+      targetAudio.removeEventListener('error', onError)
+    }
+  }
+
+  // Second-stage retry: this is the last chance — if proxy also doesn't reach
+  // 'playing' within the threshold, give up and surface "Playback failed".
+  const runProxyFallback = async (
+    station: RadioStation,
+    originalUrl: string,
+    thresholdMs: number
+  ) => {
+    if (currentStation.value?.stationuuid !== station.stationuuid) {
+      // User already moved on — abandon the fallback silently.
+      return
+    }
+    if (!audio.value) return
+
+    proxyOverrideStations.value.add(station.stationuuid)
+
+    const proxiedUrl = wrapWithStreamProxy(originalUrl)
+    console.log(`[playback] retrying via proxy: ${proxiedUrl}`)
+
+    destroyHls()
+    audio.value.src = proxiedUrl
+    audio.value.load()
+
+    const targetAudio = audio.value
+    let resolved = false
+    let secondTimer: ReturnType<typeof setTimeout> | null = null
+
+    const giveUp = (reason: string) => {
+      if (resolved) return
+      resolved = true
+      if (secondTimer) {
+        clearTimeout(secondTimer)
+        secondTimer = null
+      }
+      targetAudio.removeEventListener('playing', onPlaying)
+      targetAudio.removeEventListener('error', onError)
+      console.warn(`[playback] proxy fallback also failed for "${station.name}": ${reason}`)
+      error.value = useLanguageStringForError()
+      isPlaying.value = false
+      isLoading.value = false
+    }
+
+    const onPlaying = () => {
+      if (resolved) return
+      resolved = true
+      if (secondTimer) {
+        clearTimeout(secondTimer)
+        secondTimer = null
+      }
+      targetAudio.removeEventListener('error', onError)
+      console.log(`[playback] proxy fallback succeeded for "${station.name}"`)
+    }
+
+    const onError = () => {
+      giveUp('audio element fired error on proxied src')
+    }
+
+    targetAudio.addEventListener('playing', onPlaying, { once: true })
+    targetAudio.addEventListener('error', onError, { once: true })
+
+    secondTimer = setTimeout(() => {
+      if (targetAudio.readyState >= 3) {
+        // Already buffered enough, treat as success.
+        if (!resolved) {
+          resolved = true
+          targetAudio.removeEventListener('playing', onPlaying)
+          targetAudio.removeEventListener('error', onError)
+        }
+        return
+      }
+      giveUp(`no 'playing' event on proxied src within ${thresholdMs}ms`)
+    }, thresholdMs)
+
+    try {
+      await targetAudio.play()
+    } catch (playErr) {
+      console.error('[playback] proxy fallback play() rejected:', playErr)
+      giveUp(`proxy play() rejected: ${playErr instanceof Error ? playErr.message : String(playErr)}`)
+    }
+  }
+
+  const useLanguageStringForError = (): string => {
+    try {
+      const t = useLanguageStore().t
+      const localized = t('player.error')
+      if (typeof localized === 'string' && localized !== 'player.error') {
+        return localized
+      }
+    } catch {
+      // language store not ready yet — fall through to default
+    }
+    return '播放失败，请稍后重试'
+  }
+
   // 计算属性
   const playerState = computed<PlayerState>(() => ({
     isPlaying: isPlaying.value,
@@ -472,7 +677,10 @@ export const usePlayerStore = defineStore('player', () => {
       // 清除之前的错误
       error.value = null
       isLoading.value = true
-      
+
+      // 切站时把上一站还没触发的 fallback 计时器拆掉
+      clearAutoFallback()
+
       // 如果正在播放其他电台，先停止
       if (currentStation.value && currentStation.value.stationuuid !== station.stationuuid) {
         audio.value!.pause()
@@ -484,7 +692,8 @@ export const usePlayerStore = defineStore('player', () => {
       currentStation.value = station
       addToHistory(station)
 
-      const streamUrl = resolveStreamUrl(station)
+      const { streamUrl, originalUrl, forcedThroughProxy } = buildPlaybackUrl(station)
+      const startedOnProxy = isProxiedStreamUrl(streamUrl)
       applyAudioOutputSettings()
 
       if (isHlsStream(station, streamUrl)) {
@@ -502,6 +711,15 @@ export const usePlayerStore = defineStore('player', () => {
       await announceNativeMetadata(station)
       await announceNativePlaybackState('playing')
       await startBackgroundAudio(station)
+
+      // 只在「直连」分支挂自动回退；走代理的（HLS / mixed-content / 用户强制
+      // 代理 / 本会话曾经回退过的电台）已经是兜底路径，再失败就是真的挂了，
+      // 走原有 retry / error 即可，不需要二次跳。
+      if (!startedOnProxy && !forcedThroughProxy && originalUrl) {
+        const settings = usePlaybackSettingsStore()
+        const thresholdMs = settings.failoverTimeoutSec * 1000
+        scheduleAutoFallback(station, originalUrl, thresholdMs)
+      }
     } catch (playError) {
       console.error(`播放重试 (重试 ${retryCount}/${maxRetries}):`, playError)
       
@@ -523,6 +741,7 @@ export const usePlayerStore = defineStore('player', () => {
   // 暂停播放
   const pauseStation = async () => {
     playbackIntent.value = 'paused'
+    clearAutoFallback()
     if (audio.value) {
       audio.value.pause()
     }
@@ -550,6 +769,7 @@ export const usePlayerStore = defineStore('player', () => {
   // 停止播放
   const stopStation = async () => {
     playbackIntent.value = 'stopped'
+    clearAutoFallback()
     destroyHls()
     if (audio.value) {
       audio.value.pause()
