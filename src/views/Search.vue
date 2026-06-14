@@ -66,6 +66,7 @@
         <div class="absolute right-3 top-1/2 transform -translate-y-1/2 flex items-center gap-1">
           <button
             v-if="hasSearchText"
+            type="button"
             @click="clearSearch"
             class="p-1 rounded-full hover:bg-gray-100 dark:hover:bg-dark-gray transition-colors"
             :title="t('search.clear')"
@@ -75,13 +76,13 @@
             </svg>
           </button>
           <button
-            @click="performSearch"
-            :disabled="!hasSearchText"
+            type="button"
+            @click="handleSearchButtonClick"
             :class="[
               'p-1.5 rounded-full transition-colors',
               hasSearchText
                 ? 'bg-ios-blue text-white hover:bg-blue-600 active:bg-blue-700'
-                : 'bg-gray-200 dark:bg-dark-gray text-ios-gray dark:text-dark-secondary cursor-not-allowed'
+                : 'bg-ios-blue/40 text-white/80'
             ]"
             :title="t('search.search')"
           >
@@ -374,6 +375,26 @@ const handleBlur = () => {
       performSearch()
     }, 150)
   }
+}
+
+// 搜索按钮点击：兜底把 input 当前值强制 sync 到 searchQuery 后再搜，
+// 避免 Android WebView 上 v-model + IME composition 时序问题导致 searchQuery
+// 滞后于 DOM 实际值。
+const handleSearchButtonClick = () => {
+  const inputEl = searchInputRef.value
+  if (inputEl) {
+    const currentValue = inputEl.value
+    if (currentValue !== searchQuery.value) {
+      searchQuery.value = currentValue
+    }
+    // 主动收起虚拟键盘（IME 弹出时 click 偶尔被吞掉，先 blur 一下更稳）
+    inputEl.blur()
+  }
+  if (searchTimeout.value) {
+    clearTimeout(searchTimeout.value)
+    searchTimeout.value = null
+  }
+  performSearch()
 }
 
 const performSearch = async () => {

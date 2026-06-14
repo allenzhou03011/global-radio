@@ -2,6 +2,18 @@
 
 所有重要变更都会记录在这里。版本号遵循 [SemVer](https://semver.org/lang/zh-CN/)。
 
+## [2.0.12] - 2026-06-14
+
+### Fixed
+
+- **搜索按钮"显示但点不动"** —— v2.0.10 的搜索按钮用 `:disabled="!hasSearchText"` 控制可点性，在某些 Android WebView 上 `disabled` 属性配合 `cursor-not-allowed` 类名会让按钮的 click 事件被吞，即使 `hasSearchText` 已经变 true 也无法触发。
+- 改成永远不带 `disabled`，按钮始终可点；点击时通过 `searchInputRef.value` 把 DOM input 的当前值强制 sync 到 `searchQuery`，再调 `performSearch`，绕开 v-model + IME composition 可能的时序问题。视觉上保留"空输入时按钮变浅"的提示。
+- 顺便给两个 button 加上 `type="button"`，防止极端情况下被解析成 submit。
+
+### Improved
+
+- 点击搜索按钮时主动 `inputEl.blur()` 收起虚拟键盘，防止部分国产 ROM 上 IME 浮窗吞掉 click 事件。
+
 ## [2.0.11] - 2026-06-14
 
 ### Fixed
