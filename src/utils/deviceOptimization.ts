@@ -1,6 +1,5 @@
 // 设备优化工具
 export class DeviceOptimization {
-  private wakeLock: any = null
   private currentAudio: HTMLAudioElement | null = null
   private isInBackground: boolean = false
 
@@ -9,28 +8,20 @@ export class DeviceOptimization {
     this.setupAudioFocusHandlers()
   }
 
-  // 请求屏幕唤醒锁，防止设备休眠
+  // Screen Wake Lock 已弃用：之前用 navigator.wakeLock.request('screen')
+  // 强制屏幕保持点亮来阻止 WebView 暂停音频。这种做法的副作用是
+  // 用户即使长时间不操作也无法自动息屏，体验很差。
+  //
+  // 现在 Android 端改由原生 MediaPlaybackService 提供 PARTIAL_WAKE_LOCK
+  // 让 CPU 保持运转但不影响屏幕；iOS 端依赖 UIBackgroundModes；Web 端
+  // 锁屏即停符合浏览器默认行为。这两个方法保留签名是为了向后兼容
+  // 已经在调用的旧代码路径。
   async requestWakeLock() {
-    try {
-      if ('wakeLock' in navigator) {
-        this.wakeLock = await (navigator as any).wakeLock.request('screen')
-        console.log('屏幕唤醒锁已激活')
-        
-        this.wakeLock.addEventListener('release', () => {
-          console.log('屏幕唤醒锁已释放')
-        })
-      }
-    } catch (err) {
-      console.log('无法获取屏幕唤醒锁:', err)
-    }
+    // no-op by design
   }
 
-  // 释放屏幕唤醒锁
   releaseWakeLock() {
-    if (this.wakeLock) {
-      this.wakeLock.release()
-      this.wakeLock = null
-    }
+    // no-op by design
   }
 
   // 设置页面可见性变化处理

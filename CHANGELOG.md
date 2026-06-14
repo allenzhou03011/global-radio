@@ -2,6 +2,12 @@
 
 所有重要变更都会记录在这里。版本号遵循 [SemVer](https://semver.org/lang/zh-CN/)。
 
+## [2.0.5] - 2026-06-14
+
+### Fixed
+
+- **app 打开时屏幕一直不息屏** —— 上游代码原本用 `navigator.wakeLock.request('screen')`（Screen Wake Lock API）强制屏幕保持点亮来阻止 WebView 暂停音频。这种做法的副作用是用户长时间不操作也无法自动息屏，非常费电。改为 no-op，Android 端依靠 v2.0.4 引入的原生 `MediaPlaybackService`（持有 `PARTIAL_WAKE_LOCK`：CPU 不睡但屏幕可正常息屏）来维持后台播放。
+
 ## [2.0.4] - 2026-06-14
 
 ### Fixed

@@ -174,8 +174,6 @@ export const usePlayerStore = defineStore('player', () => {
         isLoading.value = false
         error.value = null
         deviceOptimization.optimizeAudioElement(audio.value!)
-        deviceOptimization.requestWakeLock()
-        // 媒体控制已移除
       })
       
       audio.value.addEventListener('pause', () => {
@@ -361,9 +359,6 @@ export const usePlayerStore = defineStore('player', () => {
     mediaSessionManager.clear()
     await announceNativePlaybackState('none')
     await stopBackgroundAudio()
-    
-    // 停止播放时释放唤醒锁
-    deviceOptimization.releaseWakeLock()
   }
 
   // 设置音量
