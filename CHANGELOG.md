@@ -2,6 +2,19 @@
 
 所有重要变更都会记录在这里。版本号遵循 [SemVer](https://semver.org/lang/zh-CN/)。
 
+## [2.0.19] - 2026-06-14
+
+### Fixed
+
+- **国外电台 / Mixed-content 走代理时永远不出声**（`stream-proxy/server.mjs` `proxyRequest()` 第 217 行 `await upstream.arrayBuffer()` bug）—— `arrayBuffer()` 只对**有限响应**（HLS playlist、HLS segment）有意义，而 Icecast / Shoutcast / 连续 MP3 / AAC 这种**无限**音频流根本没有"完整 body"——`arrayBuffer()` 会一直等下去直到上游主动 EOF（永远不会发生），客户端 `<audio>` 元素只看到一个永远 hang 的请求，于是任何因为 mixed-content / HLS 走代理分支的电台（外网 HTTP-only 居多）实际上都是不出声、不报错、转圈圈。
+- 修复（`stream-proxy/server.mjs`）：
+  - 引入 `node:stream` 的 `Readable.fromWeb()`，把 `upstream.body`（一个 web `ReadableStream`）转成 Node 端 `Readable`，再 `.pipe(res)` 一路写到响应；不再 buffer。
+  - 转发上游 `status`、`Content-Type`，有 `Content-Length` 时也透传，强制 `Cache-Control: no-store`（电台流不该被中间层缓存）。
+  - `req.on('close')` 客户端断开时立刻 `nodeStream.destroy()`，连带通过 `Readable.fromWeb` 的 lock 机制取消上游 socket，杜绝用户切台 / app 退到后台时遗留的死连接。
+  - 上游 socket 错误（`nodeStream.on('error')`）只 `console.warn` 一行 + `res.end()`，不再让一个上游错误把整个 Node 进程拖崩。
+  - HLS playlist (`.m3u8`) 重写路径**完全保持不变**——它本来就是有限文本响应，buffer 一次重写 URL 是对的。
+- 验证（本地）：拿 `http://ais-sa3.cdnstream1.com/2606_128.aac`（一条已知好用的 Icecast AAC 流）打 `curl -m 3 /stream-proxy/?url=...`，3 秒内能拿到 200 OK + `Content-Type: audio/aac` 头并收到 ~160 KB 的 AAC 帧（首字节 `0xFFF1` = ADTS sync）；同一时间连发三次 1 秒断开请求，服务器进程依然存活、依然能正常响应 `/api/auth/me`。
+
 ## [2.0.18] - 2026-06-14
 
 ### Fixed

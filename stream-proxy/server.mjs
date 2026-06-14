@@ -1,6 +1,7 @@
 import http from 'node:http'
 import crypto from 'node:crypto'
 import { URL } from 'node:url'
+import { Readable } from 'node:stream'
 import { readUserData, writeUserData } from './user-data.mjs'
 import { userExists, validateUserCredentials, changeUserPassword } from './users-config.mjs'
 
@@ -183,15 +184,16 @@ async function proxyRequest(targetUrl, req, res) {
     redirect: 'follow'
   })
 
-  const contentType = (upstream.headers.get('content-type') || '').split(';')[0].trim().toLowerCase()
+  const rawContentType = upstream.headers.get('content-type') || ''
+  const contentType = rawContentType.split(';')[0].trim().toLowerCase()
   const isPlaylist = M3U8_TYPES.has(contentType) || targetUrl.toLowerCase().includes('.m3u8')
 
   const headers = corsHeaders({
     'Cache-Control': 'no-store'
   })
 
-  if (contentType) {
-    headers['Content-Type'] = upstream.headers.get('content-type')
+  if (rawContentType) {
+    headers['Content-Type'] = rawContentType
   }
 
   if (req.method === 'HEAD') {
@@ -206,6 +208,8 @@ async function proxyRequest(targetUrl, req, res) {
   }
 
   if (isPlaylist) {
+    // Playlists are tiny finite docs that need URL rewriting before being
+    // handed back, so it is OK to buffer them fully.
     const text = await upstream.text()
     const rewritten = rewritePlaylist(text, targetUrl)
     headers['Content-Type'] = contentType || 'application/vnd.apple.mpegurl'
@@ -214,9 +218,50 @@ async function proxyRequest(targetUrl, req, res) {
     return
   }
 
-  const buffer = Buffer.from(await upstream.arrayBuffer())
-  res.writeHead(200, headers)
-  res.end(buffer)
+  // Audio streams (Icecast / Shoutcast / continuous MP3 / AAC) are
+  // potentially infinite. Buffering via upstream.arrayBuffer() never resolves
+  // and the connection hangs forever, which is exactly the user-visible bug
+  // foreign HTTP-only stations were hitting on the proxied path. Stream the
+  // body straight through instead.
+  const contentLength = upstream.headers.get('content-length')
+  if (contentLength) {
+    headers['Content-Length'] = contentLength
+  }
+
+  res.writeHead(upstream.status, headers)
+
+  if (!upstream.body) {
+    res.end()
+    return
+  }
+
+  // Readable.fromWeb takes a lock on the upstream web stream, so cancelling
+  // upstream.body directly after this point throws "ReadableStream is locked".
+  // Destroying the Node side instead releases the lock and cancels upstream.
+  const nodeStream = Readable.fromWeb(upstream.body)
+
+  // If the client (audio element) goes away — user switched stations, app
+  // backgrounded, network dropped — release the upstream socket promptly so
+  // we don't leak file descriptors against the radio host.
+  const onClientClose = () => {
+    if (!nodeStream.destroyed) {
+      nodeStream.destroy()
+    }
+  }
+  req.on('close', onClientClose)
+
+  nodeStream.on('error', (err) => {
+    console.warn('[stream-proxy] upstream stream error:', err && err.message ? err.message : err)
+    if (!res.writableEnded) {
+      try {
+        res.end()
+      } catch (endErr) {
+        console.debug('[stream-proxy] res.end after upstream error failed:', endErr)
+      }
+    }
+  })
+
+  nodeStream.pipe(res)
 }
 
 async function handleAuth(req, res, pathname) {
