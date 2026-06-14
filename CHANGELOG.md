@@ -2,6 +2,17 @@
 
 所有重要变更都会记录在这里。版本号遵循 [SemVer](https://semver.org/lang/zh-CN/)。
 
+## [2.0.13] - 2026-06-14
+
+### Fixed
+
+- **下拉通知栏里的播放大卡片消失** —— v2.0.6 引入的 `MediaPlaybackService` 跟 `@jofr/capacitor-media-session` 内置的 `MediaSessionService` **互相挤掉对方的媒体通知**：两个 service 都声明 `foregroundServiceType="mediaPlayback"`，Android（尤其 MIUI/HyperOS）的媒体控件面板只会留一条媒体类前台通知，于是只有先注册的那个胜出。v2.0.8 我又把我们这条通知降级成 `PRIORITY_MIN` + `CATEGORY_SERVICE`，结果反而让系统更倾向于把我们这条极简通知当成主媒体通知，把 `@jofr` 的 MediaStyle 大卡片完全藏起来。
+- 修复：
+  - 删除我们自己写的 `MediaPlaybackService`，让 `@jofr` 那个 service 独占 `mediaPlayback` 前台通道——它的 `MediaStyle` 通知（带电台名 / 封面 / 播放暂停按钮）会重新出现在下拉栏；
+  - WakeLock / WifiLock 不需要靠 service 持有，直接放在 `BackgroundAudioPlugin` 里。`BackgroundAudio.start()` 时 acquire、`stop()` 时 release，对外 API 完全不变，`player.ts` 不需要改一行；
+  - 锁仅在播放时持有，停止后立刻释放，不会影响系统息屏时机。
+- 副作用：v2.0.8 修的"前台一直亮屏"和"息屏几秒后断流"这两条理论上更稳了，因为 `@jofr` 那条 MediaStyle 通知本来就是 `CATEGORY_TRANSPORT`（系统认定的播放通知），不会触发某些 ROM "看到 service 通知就保持亮屏"的逻辑，息屏判定也更标准。
+
 ## [2.0.12] - 2026-06-14
 
 ### Fixed

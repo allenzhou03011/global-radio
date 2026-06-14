@@ -12,7 +12,7 @@ export class DeviceOptimization {
   // 强制屏幕保持点亮来阻止 WebView 暂停音频。这种做法的副作用是
   // 用户即使长时间不操作也无法自动息屏，体验很差。
   //
-  // 现在 Android 端改由原生 MediaPlaybackService 提供 PARTIAL_WAKE_LOCK
+  // 现在 Android 端改由原生 BackgroundAudioPlugin 直接持有 PARTIAL_WAKE_LOCK
   // 让 CPU 保持运转但不影响屏幕；iOS 端依赖 UIBackgroundModes；Web 端
   // 锁屏即停符合浏览器默认行为。这两个方法保留签名是为了向后兼容
   // 已经在调用的旧代码路径。
