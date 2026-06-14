@@ -2,6 +2,14 @@
 
 所有重要变更都会记录在这里。版本号遵循 [SemVer](https://semver.org/lang/zh-CN/)。
 
+## [2.0.17] - 2026-06-14
+
+### Fixed
+
+- **下拉播放卡片的电台 logo 依然不显示（v2.0.16 在真机上修不到位）** —— v2.0.16 改成 JS 端异步 `fetch(favicon)` 转 base64 再喂给 `MediaSession.setMetadata`，本地直连开发可以用，但在真机 / 生产环境里 WebView 用 `https://` 加载，favicon CDN 又几乎都不给 `Access-Control-Allow-Origin`，浏览器 CORS 把整个 fetch 拦下，base64 永远拿不到，largeIcon 永远为 null。emulator 实测 logcat 里能看到 `Access to fetch at ... has been blocked by CORS policy: No 'Access-Control-Allow-Origin' header is present`。
+- 修复：把 favicon 抓取改走 `CapacitorHttp.get({ url, responseType: 'blob' })`。原生 Android/iOS 上 `CapacitorHttp` 不走 WebView 的 fetch / XHR，而是直接走原生 HTTP 客户端，**完全绕开 CORS 同源策略**；native 端 `responseType: 'blob'` 直接返回 base64 字符串，省一次 Blob→ArrayBuffer→base64 的转换。Web/PWA 路径继续用原来的 `fetch` 兜底。timeout (4s) + 大小上限 (256 KB) + Content-Type 校验 + 按 URL 缓存全部保留。
+- emulator 实测：播 *EuroDance 90 radio* 后 `dumpsys notification --noredact` 里现在能看到 `android.largeIcon=Icon (Icon(typ=BITMAP size=64x64))`，下拉媒体卡片的封面整张 favicon 都正确铺出来了。
+
 ## [2.0.16] - 2026-06-14
 
 ### Fixed

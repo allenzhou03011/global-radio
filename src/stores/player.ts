@@ -6,7 +6,7 @@ import { useHistoryStore } from './history'
 import { mediaSessionManager } from '@/utils/mediaSession'
 import { deviceOptimization } from '@/utils/deviceOptimization'
 import { isHlsStream, resolveStreamUrl, supportsNativeHls } from '@/utils/streamUrl'
-import { Capacitor } from '@capacitor/core'
+import { Capacitor, CapacitorHttp } from '@capacitor/core'
 import { MediaSession } from '@jofr/capacitor-media-session'
 import { startBackgroundAudio, stopBackgroundAudio } from '@/utils/backgroundAudio'
 
@@ -74,41 +74,74 @@ export const usePlayerStore = defineStore('player', () => {
     }
 
     const promise = (async (): Promise<string | null> => {
-      const controller = new AbortController()
-      const timeoutId = setTimeout(() => controller.abort(), ARTWORK_FETCH_TIMEOUT_MS)
       try {
-        const response = await fetch(url, {
-          method: 'GET',
-          signal: controller.signal,
-          credentials: 'omit',
-          redirect: 'follow'
-        })
-        if (!response.ok) return null
+        // 原生 Android/iOS 上走 CapacitorHttp 绕开 WebView CORS（电台 favicon
+        // 服务器基本不会给我们的 origin 配 Access-Control-Allow-Origin），
+        // responseType=blob 时 native 端直接给我们 base64 字符串
+        if (Capacitor.isNativePlatform()) {
+          const response = await Promise.race([
+            CapacitorHttp.get({
+              url,
+              responseType: 'blob',
+              connectTimeout: ARTWORK_FETCH_TIMEOUT_MS,
+              readTimeout: ARTWORK_FETCH_TIMEOUT_MS
+            }),
+            new Promise<never>((_, reject) =>
+              setTimeout(() => reject(new Error('artwork timeout')), ARTWORK_FETCH_TIMEOUT_MS + 500)
+            )
+          ])
 
-        const contentType = response.headers.get('content-type') || ''
-        if (contentType && !contentType.startsWith('image/')) {
-          return null
+          if (!response || response.status < 200 || response.status >= 300) return null
+
+          const headers = response.headers || {}
+          const contentTypeRaw =
+            headers['Content-Type'] || headers['content-type'] || ''
+          const contentType = typeof contentTypeRaw === 'string' ? contentTypeRaw.toLowerCase() : ''
+          if (contentType && !contentType.startsWith('image/')) return null
+
+          const mime = contentType.startsWith('image/')
+            ? contentType.split(';')[0].trim()
+            : 'image/png'
+
+          // native 返回值是 base64 string；web 路径上面已经分开了
+          const base64 = typeof response.data === 'string' ? response.data : null
+          if (!base64) return null
+          // 粗略大小判断：base64 字符数 * 0.75 ≈ 字节数
+          if (base64.length * 0.75 > ARTWORK_MAX_BYTES) return null
+          return `data:${mime};base64,${base64}`
         }
 
-        const blob = await response.blob()
-        if (blob.size === 0 || blob.size > ARTWORK_MAX_BYTES) return null
-
-        const mime = contentType.startsWith('image/') ? contentType.split(';')[0].trim() : (blob.type || 'image/png')
-
-        const buf = await blob.arrayBuffer()
-        const bytes = new Uint8Array(buf)
-        let binary = ''
-        const chunk = 0x8000
-        for (let i = 0; i < bytes.length; i += chunk) {
-          binary += String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + chunk)))
+        // Web/PWA 路径：常规 fetch
+        const controller = new AbortController()
+        const timeoutId = setTimeout(() => controller.abort(), ARTWORK_FETCH_TIMEOUT_MS)
+        try {
+          const response = await fetch(url, {
+            method: 'GET',
+            signal: controller.signal,
+            credentials: 'omit',
+            redirect: 'follow'
+          })
+          if (!response.ok) return null
+          const contentType = response.headers.get('content-type') || ''
+          if (contentType && !contentType.startsWith('image/')) return null
+          const blob = await response.blob()
+          if (blob.size === 0 || blob.size > ARTWORK_MAX_BYTES) return null
+          const mime = contentType.startsWith('image/') ? contentType.split(';')[0].trim() : (blob.type || 'image/png')
+          const buf = await blob.arrayBuffer()
+          const bytes = new Uint8Array(buf)
+          let binary = ''
+          const chunk = 0x8000
+          for (let i = 0; i < bytes.length; i += chunk) {
+            binary += String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + chunk)))
+          }
+          const base64 = btoa(binary)
+          return `data:${mime};base64,${base64}`
+        } finally {
+          clearTimeout(timeoutId)
         }
-        const base64 = btoa(binary)
-        return `data:${mime};base64,${base64}`
       } catch (err) {
         console.warn('[mediaSession] artwork fetch failed:', err)
         return null
-      } finally {
-        clearTimeout(timeoutId)
       }
     })()
 
