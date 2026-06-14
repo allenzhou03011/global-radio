@@ -26,7 +26,29 @@ export default defineConfig({
       workbox: {
         globPatterns: ['**/*.{js,css,html,ico,png,svg,jpg,jpeg,webp,woff2}'],
         maximumFileSizeToCacheInBytes: 3000000, // 3MB
+        // 让新版 SW 立刻激活、立刻接管所有页面，避免老 Capacitor WebView
+        // 长时间不重启导致用户卡在旧 bundle 上（v2.0.6 之前的 BUG 残留）。
+        skipWaiting: true,
+        clientsClaim: true,
+        // 强制 SW 每次 navigation 优先走网络，缓存只作为离线兜底，避免
+        // index.html / JS bundle 在用户端无限期缓存。
+        cleanupOutdatedCaches: true,
+        navigateFallback: '/index.html',
         runtimeCaching: [
+          {
+            // 站点入口和 JS / CSS：网络优先，5s 超时后回退缓存
+            urlPattern: ({ request, sameOrigin }) =>
+              sameOrigin && (request.destination === 'document' || request.destination === 'script' || request.destination === 'style'),
+            handler: 'NetworkFirst',
+            options: {
+              cacheName: 'app-shell',
+              networkTimeoutSeconds: 5,
+              expiration: {
+                maxEntries: 60,
+                maxAgeSeconds: 60 * 60 * 24, // 1 天
+              },
+            },
+          },
           {
             urlPattern: /^https:\/\/.*\.radio-browser\.info\/.*/i,
             handler: 'CacheFirst',

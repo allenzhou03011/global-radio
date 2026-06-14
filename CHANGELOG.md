@@ -2,6 +2,20 @@
 
 所有重要变更都会记录在这里。版本号遵循 [SemVer](https://semver.org/lang/zh-CN/)。
 
+## [2.0.11] - 2026-06-14
+
+### Fixed
+
+- **PWA Service Worker 卡在旧 bundle 永不更新** —— 用户反馈 v2.0.10 装上后搜索按钮还是不出现、设置也进不去，但服务器实际已经部署了修复版。根因：
+  - 之前的 PWA 配置缺 `skipWaiting` + `clientsClaim`，新 SW 装好后会进入 "waiting" 状态，要等所有客户端关闭才接管，但 Capacitor WebView 生命周期里"app 后台不关闭，前台 resume 不重新注册"，所以 SW 永远不更新；
+  - `dist/registerSW.js` 是 vite-plugin-pwa 默认注入的最简注册脚本，`registerType: 'autoUpdate'` 只是表示"不弹窗静默装"，不会自动刷新页面，导致用户即使新 SW 装好了也仍然看老 bundle。
+- 修复：
+  - workbox 加上 `skipWaiting: true` + `clientsClaim: true` + `cleanupOutdatedCaches: true`；
+  - `src/main.ts` 显式用 `registerSW({ immediate: true, onNeedRefresh: () => updateSW(true) })`，新 SW 装好后立刻触发整页刷新；
+  - 每 30 分钟主动调一次 `registration.update()`，保证后台跑着的 app 也能及时拿到新代码；
+  - 给 `index.html` / JS / CSS 的同源请求加 `NetworkFirst` 策略（5s 超时回退缓存），离线兜底 + 在线总是新版本。
+- **⚠️ 一次性手动操作**：从 v2.0.10 及之前升级到 v2.0.11 的用户**必须**先 "系统设置 → 应用 → 全球电台 → 存储 → 清除缓存"（或卸载重装）一次，把旧 SW 踢掉。之后再升级版本就丝滑无感了。
+
 ## [2.0.10] - 2026-06-14
 
 ### Fixed
