@@ -14,6 +14,7 @@ pnpm-debug.log*
 
 .vscode
 .idea
+.cursor/
 
 android/.gradle
 android/.idea
