@@ -13,7 +13,9 @@ const messages = {
     invalidUrlError: 'Please enter a valid http or https URL',
     languageLabel: 'Language',
     useSavedServer: 'Use previous server',
-    savedHint: 'A previous server is saved on this device.'
+    savedHint: 'A previous server is saved on this device.',
+    connecting: 'Connecting…',
+    connectTimeoutError: 'Could not reach this server. Check the URL or your network.'
   },
   zh: {
     pageTitle: '全球电台 - 连接服务器',
@@ -27,7 +29,9 @@ const messages = {
     invalidUrlError: '请输入有效的 http 或 https 地址',
     languageLabel: '语言',
     useSavedServer: '使用上次的服务器',
-    savedHint: '本机已保存上次连接的服务器。'
+    savedHint: '本机已保存上次连接的服务器。',
+    connecting: '连接中…',
+    connectTimeoutError: '无法连接到该服务器，请检查 URL 或网络。'
   },
   es: {
     pageTitle: 'Radio Global - Conectar servidor',

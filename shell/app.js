@@ -10,12 +10,14 @@ const STORAGE_KEY = 'global-radio-backend-url'
 const form = document.getElementById('connect-form')
 const input = document.getElementById('server-url')
 const errorEl = document.getElementById('error')
+const connectBtn = document.getElementById('connect-btn')
 const clearBtn = document.getElementById('clear-btn')
 const useSavedBtn = document.getElementById('use-saved-btn')
 const savedHintEl = document.getElementById('saved-hint')
 const languageSelect = document.getElementById('language-select')
 
 let currentLanguage = detectShellLanguage()
+let busyTimeoutId = null
 
 function showError(message) {
   errorEl.textContent = message
@@ -58,9 +60,43 @@ function clearSavedUrl() {
   input.focus()
 }
 
+function setBusy(isBusy, busyLabelKey) {
+  const messages = getShellMessages(currentLanguage)
+  form.classList.toggle('is-busy', isBusy)
+  connectBtn.disabled = isBusy
+  input.disabled = isBusy
+  if (useSavedBtn) useSavedBtn.disabled = isBusy
+  if (clearBtn) clearBtn.disabled = isBusy
+  if (languageSelect) languageSelect.disabled = isBusy
+
+  if (isBusy) {
+    const label = (busyLabelKey && messages[busyLabelKey]) || messages.connecting || messages.connect
+    connectBtn.innerHTML = `<span class="btn-spinner" aria-hidden="true"></span>${label}`
+    // Safety: if navigation never happens (unreachable host, etc.), let the
+    // user retry after ~20s instead of being stuck on a spinner forever.
+    if (busyTimeoutId) clearTimeout(busyTimeoutId)
+    busyTimeoutId = setTimeout(() => {
+      setBusy(false)
+      showError(getShellMessages(currentLanguage).connectTimeoutError || messages.invalidUrlError)
+    }, 20000)
+  } else {
+    if (busyTimeoutId) {
+      clearTimeout(busyTimeoutId)
+      busyTimeoutId = null
+    }
+    connectBtn.textContent = messages.connect
+  }
+}
+
 function connect(url) {
   saveUrl(url)
-  window.location.replace(url)
+  setBusy(true)
+  // Yield a frame so the browser actually paints the loading state before
+  // the navigation kicks in (window.location.replace blocks paint on some
+  // WebViews).
+  requestAnimationFrame(() => {
+    window.location.replace(url)
+  })
 }
 
 function wantsServerChange() {
@@ -143,8 +179,17 @@ if (savedUrl && !wantsServerChange()) {
   useSavedBtn?.addEventListener('click', () => {
     const saved = loadSavedUrl()
     if (saved) {
-      window.location.replace(saved)
+      setBusy(true)
+      requestAnimationFrame(() => {
+        window.location.replace(saved)
+      })
     }
+  })
+
+  // If the user comes back to the shell via browser history (bfcache), drop
+  // the spinner so the form is usable again.
+  window.addEventListener('pageshow', (event) => {
+    if (event.persisted) setBusy(false)
   })
 
   input.focus()
