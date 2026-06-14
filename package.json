@@ -1,7 +1,7 @@
 {
   "name": "radio-app",
   "private": true,
-  "version": "2.0.13",
+  "version": "2.0.14",
   "description": "Global Radio client shell and web app",
   "author": "GlobalRadio",
   "type": "module",

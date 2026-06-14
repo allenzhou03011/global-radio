@@ -2,6 +2,16 @@
 
 所有重要变更都会记录在这里。版本号遵循 [SemVer](https://semver.org/lang/zh-CN/)。
 
+## [2.0.14] - 2026-06-14
+
+### Fixed
+
+- **播放卡片大概率仍然不出现 / 系统通知设置里没有 "Playback" channel** —— v2.0.13 只是去掉了双前台 service 的冲突，没解决另一个隐蔽更深的问题：`@jofr/capacitor-media-session` 的 Android 实现里，`setMetadata()` 会在**主线程同步** `HttpURLConnection.connect()` 抓 `station.favicon` 当封面图，**而且没有超时**。`radio-browser.info` 返回的电台 favicon 经常是慢/挂/CORS 拦截/重定向死循环的破图，整个 `setMetadata` 直接抛 `IOException`，被我们 `catch` 后吞掉，但**后面的 `setPlaybackState('playing')` 时序乱掉**，service 来不及在 5 秒窗口内 bind + `startForeground()`，于是 Android 14 把 service 直接干掉——MediaStyle 大卡片不出现，"Playback" 通知 channel 因为 `connectAndInitialize()` 从来没跑过也根本没被创建。
+- 修复：`announceNativeMetadata()` 显式传 `artwork: []`，完全跳过 @jofr 那段主线程 HTTP 同步抓图逻辑。代价是下拉通知卡片里没有电台 logo 缩略图，但播放/暂停按钮 + 电台名 + 国家全在。后续如果想要封面图，正确做法是 JS 端先把 image 抓下来用 `URL.createObjectURL(blob)` 转 base64 再传给 `setMetadata`，或者等上游修复，先不做。
+
+- **搜索按钮"输入文字后没变蓝"** —— v2.0.12 的按钮颜色绑定到 `hasSearchText`，它是 `computed` 出来读 `searchQuery.value`。但 Android WebView 上 v-model 在 IME composition 阶段更新会滞后于 DOM `input.value`，导致用户看到自己已经输入文字、按钮也能点了，颜色却仍然是浅蓝色，看上去像 disabled。
+- 修复：加了独立的 `hasInputText` ref，直接在 `@input` / `@keyup` / `@compositionupdate` / `@compositionend` 事件里从 `input.value` 实时同步，按钮视觉跟 v-model 解耦。`searchQuery = item; performSearch()` 那个历史项点击也抽成 `selectHistoryItem(item)` 一起更新。
+
 ## [2.0.13] - 2026-06-14
 
 ### Fixed

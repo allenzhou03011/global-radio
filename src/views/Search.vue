@@ -52,7 +52,9 @@
           v-model="searchQuery"
           @input="handleSearchInput"
           @compositionstart="handleCompositionStart"
+          @compositionupdate="syncInputHasText"
           @compositionend="handleCompositionEnd"
+          @keyup="syncInputHasText"
           @keyup.enter="performSearch"
           @blur="handleBlur"
           type="text"
@@ -65,7 +67,7 @@
         />
         <div class="absolute right-3 top-1/2 transform -translate-y-1/2 flex items-center gap-1">
           <button
-            v-if="hasSearchText"
+            v-if="hasInputText"
             type="button"
             @click="clearSearch"
             class="p-1 rounded-full hover:bg-gray-100 dark:hover:bg-dark-gray transition-colors"
@@ -80,7 +82,7 @@
             @click="handleSearchButtonClick"
             :class="[
               'p-1.5 rounded-full transition-colors',
-              hasSearchText
+              hasInputText
                 ? 'bg-ios-blue text-white hover:bg-blue-600 active:bg-blue-700'
                 : 'bg-ios-blue/40 text-white/80'
             ]"
@@ -125,7 +127,7 @@
           <button
             v-for="(item, index) in searchHistory.slice(0, 6)"
             :key="index"
-            @click="searchQuery = item; performSearch()"
+            @click="selectHistoryItem(item)"
             class="px-3 py-1 bg-gray-100 dark:bg-dark-gray rounded-full text-sm text-ios-dark-gray dark:text-white hover:bg-ios-blue hover:text-white transition-colors"
           >
             {{ item }}
@@ -290,6 +292,10 @@ const hasSearchText = computed(() => {
   return typeof value === 'string' && value.trim().length > 0
 })
 
+// 直接从 DOM input 同步出来的"有没有文字"状态——专门给按钮视觉用。
+// 详见 syncInputHasText() 注释。
+const hasInputText = ref(false)
+
 // 移动端输入法状态追踪
 const isMobile = ref(false)
 
@@ -302,6 +308,17 @@ const detectMobile = () => {
 // 搜索输入处理 - 重新设计的简化版本
 const searchInputRef = ref<HTMLInputElement>()
 const searchTimeout = ref<ReturnType<typeof setTimeout> | null>(null)
+
+// 从 DOM input 实时同步"是否有文字"。Android WebView 上 v-model 在 IME
+// composition 阶段更新会滞后，仅依赖 searchQuery 的话按钮颜色会卡在灰色
+// 不变蓝。这个函数在 @input / @keyup / @compositionupdate /
+// @compositionend 都会被调用，绕开 v-model 时序问题，确保按钮视觉
+// 跟用户感知一致。
+const syncInputHasText = () => {
+  const el = searchInputRef.value
+  const value = el ? el.value : searchQuery.value
+  hasInputText.value = typeof value === 'string' && value.trim().length > 0
+}
 
 // 统一的搜索处理函数
 const handleSearchInput = (event: Event) => {
@@ -316,6 +333,7 @@ const handleSearchInput = (event: Event) => {
   
   // 更新搜索值
   searchQuery.value = value
+  syncInputHasText()
   
   // 如果输入为空，立即清空结果
   if (!value.trim()) {
@@ -346,6 +364,7 @@ const handleCompositionEnd = (event: Event) => {
   
   // 确保搜索值同步更新，这样搜索图标就能立即显示
   searchQuery.value = value
+  syncInputHasText()
   console.log('中文输入结束:', value)
   
   // 强制触发响应式更新，确保搜索图标显示
@@ -387,6 +406,7 @@ const handleSearchButtonClick = () => {
     if (currentValue !== searchQuery.value) {
       searchQuery.value = currentValue
     }
+    syncInputHasText()
     // 主动收起虚拟键盘（IME 弹出时 click 偶尔被吞掉，先 blur 一下更稳）
     inputEl.blur()
   }
@@ -483,8 +503,15 @@ const loadMore = async () => {
   }
 }
 
+const selectHistoryItem = (item: string) => {
+  searchQuery.value = item
+  hasInputText.value = item.trim().length > 0
+  performSearch()
+}
+
 const clearSearch = () => {
   searchQuery.value = ''
+  hasInputText.value = false
   allStations.value = []
   hasSearched.value = false
   activeFilter.value = ''

@@ -53,14 +53,18 @@ export const usePlayerStore = defineStore('player', () => {
   const announceNativeMetadata = async (station: RadioStation) => {
     if (!Capacitor.isNativePlatform()) return
     try {
-      const artwork = station.favicon
-        ? [{ src: station.favicon, sizes: '512x512', type: 'image/png' }]
-        : []
+      // 故意不传 artwork：@jofr/capacitor-media-session 的 Android 实现
+      // 会在主线程做一次同步 HttpURLConnection 抓 artwork 转 Bitmap
+      // (urlToBitmap)，没有任何超时设置。一旦 station.favicon 慢/挂/CORS
+      // 拦截，setMetadata 整个抛 IOException，后面的 setPlaybackState
+      // 时序乱掉，service 都来不及 bind，导致下拉通知栏的 MediaStyle
+      // 大卡片完全消失（系统设置里都不会出现 "Playback" 通知 channel）。
+      // 牺牲掉封面图换稳定的播放卡片，对收音机这类应用是合算的。
       await MediaSession.setMetadata({
         title: station.name || 'GlobalRadio',
         artist: station.country || 'GlobalRadio',
         album: station.tags || 'Radio',
-        artwork
+        artwork: []
       })
     } catch (error) {
       console.warn('[mediaSession] setMetadata failed:', error)
