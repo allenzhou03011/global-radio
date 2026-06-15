@@ -26,18 +26,37 @@ function setLocalUserMarker(username: string | null) {
 }
 
 function mergeFavorites(server: FavoriteStation[], local: FavoriteStation[]): FavoriteStation[] {
-  const map = new Map<string, FavoriteStation>()
+  // v2.0.23: respect explicit user reorder. When the same station exists
+  // on both ends, the LOCAL position wins — that's the result of the
+  // user's drag-and-drop on this device, and re-sorting by addedAt would
+  // throw it away on every server pull. Per-item metadata (e.g., a newer
+  // addedAt from a different device) still uses the most-recent record.
+  // Stations only on the server (added on another device, not yet on
+  // this one) get appended at the end in addedAt-desc order — putting
+  // them at top would override the explicit local order users just set.
+  const localUuids = new Set(local.map(f => f.stationuuid))
+  const serverById = new Map(server.map(f => [f.stationuuid, f]))
 
-  for (const item of [...server, ...local]) {
-    const existing = map.get(item.stationuuid)
-    if (!existing || new Date(item.addedAt).getTime() > new Date(existing.addedAt).getTime()) {
-      map.set(item.stationuuid, item)
+  const result: FavoriteStation[] = []
+  for (const item of local) {
+    const serverEntry = serverById.get(item.stationuuid)
+    if (
+      serverEntry &&
+      new Date(serverEntry.addedAt).getTime() > new Date(item.addedAt).getTime()
+    ) {
+      // Prefer the newer record's metadata, but keep this position.
+      result.push(serverEntry)
+    } else {
+      result.push(item)
     }
   }
 
-  return Array.from(map.values()).sort(
-    (a, b) => new Date(b.addedAt).getTime() - new Date(a.addedAt).getTime()
-  )
+  const serverOnly = server
+    .filter(f => !localUuids.has(f.stationuuid))
+    .sort((a, b) => new Date(b.addedAt).getTime() - new Date(a.addedAt).getTime())
+  result.push(...serverOnly)
+
+  return result
 }
 
 function mergeHistory(server: HistoryItem[], local: HistoryItem[]): HistoryItem[] {

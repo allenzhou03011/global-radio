@@ -927,6 +927,28 @@ export const usePlayerStore = defineStore('player', () => {
     saveFavorites()
   }
 
+  // v2.0.23: 自定义排序。Favorites.vue 里 vue-draggable-plus 拖完会回调
+  // 这里，传入新数组 (引用上的整个新顺序)。我们做两层防抖：
+  //   1) 长度变化 → 大概率是别处并发改的，丢弃这次拖拽结果以避免覆盖。
+  //   2) 顺序未变（同 uuid 序列）→ 不写 localStorage、不触发 sync push，
+  //      避免拖了一下又放回原位时无谓地推一次用户数据上行。
+  const reorderFavorites = (newOrder: FavoriteStation[]) => {
+    if (!Array.isArray(newOrder)) return
+    if (newOrder.length !== favorites.value.length) {
+      console.warn('[favorites] reorder length mismatch, skipping')
+      return
+    }
+    const before = favorites.value.map(f => f.stationuuid).join(',')
+    const after = newOrder.map(f => f.stationuuid).join(',')
+    if (before === after) {
+      // 同位释放，no-op
+      return
+    }
+    // saveFavorites() 已经触发 scheduleUserDataPush()，新顺序自动同步到服务端。
+    favorites.value = newOrder.slice()
+    saveFavorites()
+  }
+
   // 检查特定电台是否被收藏
   const isStationFavorite = (stationUuid: string) => {
     return favorites.value.some(fav => fav.stationuuid === stationUuid)
@@ -1152,6 +1174,7 @@ export const usePlayerStore = defineStore('player', () => {
     toggleFavorite,
     isStationFavorite,
     clearFavorites,
+    reorderFavorites,
     clearError,
     setPlayFailureCallback,
     setSleepTimer,

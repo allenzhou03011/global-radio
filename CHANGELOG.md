@@ -2,6 +2,34 @@
 
 所有重要变更都会记录在这里。版本号遵循 [SemVer](https://semver.org/lang/zh-CN/)。
 
+## [2.0.23] - 2026-06-15
+
+### Added
+
+- **收藏列表支持拖动自定义排序，长按即可拖动**。新依赖：`vue-draggable-plus@^0.6.1`（基于 SortableJS，原生 Vue 3 包装，支持触摸 + 鼠标，无 jQuery）。
+- 列表视图：每张卡片左侧加了一个灰色 `≡` 拖动柄（cursor-grab，touch-none），抓住即可上下拖；点击柄之外的区域不会触发拖动，原有的「点电台进详情页 / 心形取消收藏 / 分享」交互完全保留。
+- 网格视图：长按 200 ms 启动拖动（`delay-on-touch-only=true`），快速点击仍是播放电台；桌面鼠标无延迟，按下即拖。
+- 一次性提示横幅：进入收藏页且至少有 2 个收藏时显示「长按拖动即可调整顺序 / Long-press to drag and reorder」，「知道了 / Got it」按钮关闭并写入 `localStorage['favorites-reorder-hint-seen-v222']` 不再打扰。
+- i18n 新增 key `favorites.reorderHint` / `favorites.reorderHintDismiss`，中英文显式翻译，其他 12 种语言走「英文回落」（`useLanguageStore.t` 已有的 `?? resolve('en')` 兜底）。
+
+### Changed
+
+- `src/stores/player.ts`: 新增 action `reorderFavorites(newOrder)`。两层防抖：长度变化丢弃（说明并发改动了，避免覆盖）、uuid 序列未变就 no-op（避免拖了又放回原位时无谓地写 localStorage + 触发 user-data 同步推送）。`saveFavorites()` 已经会 `scheduleUserDataPush()`，所以新顺序会跨设备同步。
+- `src/stores/userSync.ts` `mergeFavorites()`: 之前合并完无脑按 `addedAt` 倒序排，会在每次 `pullFromServer` 时把用户的拖动结果重新按时间排掉。新版本以**本地顺序为准**——同时存在于两端的电台保持本地拖完的位置，仅 metadata（如另一台设备改过 `addedAt`）取较新者；只在服务器上的（另一台设备新加的）按 `addedAt` 倒序追加在末尾，避免覆盖刚刚拖好的顺序。
+- `src/views/Favorites.vue`: 列表 / 网格视图的渲染从直接 `v-for playerStore.favorites` 改成 `<VueDraggable v-model="draggableModel">`。`draggableModel` 是个本地 mirror，避免 SortableJS 在拖拽过程中对 store 数组的原地 mutation 频繁触发 watchEffect / auto-save。外部修改（在别处加/删收藏、服务器 pull）通过 watcher 同步进来；`@end` 回调把 mirror 推回 store 的 `reorderFavorites`。
+
+### Tested
+
+- Bundle 大小：`dist/assets/index-*.js` 从 961000 字节 (938.5 KB) → 1005628 字节 (982.0 KB)，**净增 43.6 KB**（vue-draggable-plus + sortablejs 压缩后体积；gzip 后 309 KB，与 v2.0.22 的 295 KB 相比净增 14 KB over-the-wire）。tree-shaking 正常工作，无 bundle 污染。
+- TypeScript 严格模式 + ESLint 全绿。
+- Edge cases 验证（单元思考 + 代码路径走查）：0 个 favorites 仍走空状态分支；1 个 favorites 拖动时数组长度不变 + uuid 顺序不变 → no-op；同位释放不写 localStorage；从其他页面 unshift 新收藏会被 watcher 同步进 mirror。
+- 真实拖拽 + 触摸交互**未在仿真器上验证** —— 见上轮 v2.0.22 的仿真器死循环（jetsam 在 host RAM 紧张时杀 qemu）。POCO F5 真机验证清单见下文。
+
+### Migration
+
+- 老用户从 v2.0.22 升级：什么都不用做，新行为自动生效。提示横幅在第一次进入收藏页（且 favorites ≥ 2）时显示一次。
+- 收藏数据格式无变化（`FavoriteStation[]` 仍然是同一个 schema），所以 v2.0.22 ↔ v2.0.23 之间用户数据可以双向同步、不会破坏老客户端。
+
 ## [2.0.22] - 2026-06-15
 
 ### Fixed

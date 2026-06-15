@@ -96,33 +96,80 @@
 
     <!-- 收藏列表 -->
     <div v-if="playerStore.favorites.length > 0" class="container-responsive p-4">
-      <div :class="[
-        viewMode === 'list' ? 'space-y-3' : 'grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4'
-      ]">
-        <!-- 列表视图 -->
-        <template v-if="viewMode === 'list'">
-          <StationCard
-            v-for="station in playerStore.favorites"
-            :key="'list-' + station.stationuuid"
-            :station="convertToRadioStation(station)"
-            @play="playStation"
-            @favorite="removeFavorite"
-            @share="showShareModal"
-          />
-        </template>
-        
-        <!-- 网格视图 -->
-        <template v-else>
-          <StationGridCard
-            v-for="station in playerStore.favorites"
-            :key="'grid-' + station.stationuuid"
-            :station="convertToRadioStation(station)"
-            @play="playStation"
-            @favorite="removeFavorite"
-            @share="showShareModal"
-          />
-        </template>
+      <!-- v2.0.23: 一次性拖拽提示 -->
+      <div
+        v-if="showReorderHint"
+        class="mb-3 px-3 py-2 rounded-ios bg-ios-blue/10 dark:bg-ios-blue/20 border border-ios-blue/20 dark:border-ios-blue/30 flex items-center justify-between gap-3 text-xs sm:text-sm"
+      >
+        <div class="flex items-center gap-2 text-ios-blue dark:text-ios-blue min-w-0">
+          <Bars3Icon class="w-4 h-4 flex-shrink-0" />
+          <span class="truncate">{{ t('favorites.reorderHint') }}</span>
+        </div>
+        <button
+          @click="dismissReorderHint"
+          class="flex-shrink-0 px-2 py-0.5 rounded-md text-ios-blue dark:text-ios-blue hover:bg-ios-blue/20 transition-colors"
+        >
+          {{ t('favorites.reorderHintDismiss') }}
+        </button>
       </div>
+
+      <!-- 列表视图 — 左侧拖动柄 -->
+      <VueDraggable
+        v-if="viewMode === 'list'"
+        v-model="draggableModel"
+        :animation="200"
+        handle=".drag-handle"
+        :delay="0"
+        ghost-class="opacity-50"
+        chosen-class="ring-2 ring-ios-blue"
+        class="space-y-3"
+        @end="onReorderEnd"
+      >
+        <div
+          v-for="station in draggableModel"
+          :key="'list-' + station.stationuuid"
+          class="flex items-stretch gap-2"
+        >
+          <button
+            type="button"
+            class="drag-handle flex-shrink-0 flex items-center justify-center w-8 rounded-ios bg-gray-100 dark:bg-dark-gray text-ios-gray dark:text-dark-secondary cursor-grab active:cursor-grabbing select-none touch-none"
+            :aria-label="t('favorites.reorderHint')"
+          >
+            <Bars3Icon class="w-5 h-5 pointer-events-none" />
+          </button>
+          <div class="flex-1 min-w-0">
+            <StationCard
+              :station="convertToRadioStation(station)"
+              @play="playStation"
+              @favorite="removeFavorite"
+              @share="showShareModal"
+            />
+          </div>
+        </div>
+      </VueDraggable>
+
+      <!-- 网格视图 — 长按拖动 -->
+      <VueDraggable
+        v-else
+        v-model="draggableModel"
+        :animation="200"
+        :delay="200"
+        :delay-on-touch-only="true"
+        :touch-start-threshold="5"
+        ghost-class="opacity-50"
+        chosen-class="ring-2 ring-ios-blue"
+        class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4"
+        @end="onReorderEnd"
+      >
+        <StationGridCard
+          v-for="station in draggableModel"
+          :key="'grid-' + station.stationuuid"
+          :station="convertToRadioStation(station)"
+          @play="playStation"
+          @favorite="removeFavorite"
+          @share="showShareModal"
+        />
+      </VueDraggable>
     </div>
 
     <!-- 空状态 -->
@@ -187,7 +234,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, computed, watch, onMounted } from 'vue'
+import { VueDraggable } from 'vue-draggable-plus'
 import { usePlayerStore } from '@/stores/player'
 import { useLanguageStore } from '@/stores/language'
 import type { RadioStation, FavoriteStation } from '@/types/radio'
@@ -206,6 +254,58 @@ const showClearDialog = ref(false)
 const viewMode = ref<'list' | 'grid'>('list')
 const showShareModalVisible = ref(false)
 const shareStation = ref<RadioStation | null>(null)
+
+// v2.0.23: drag-and-drop reorder. We bind VueDraggable to a local mirror
+// (`draggableModel`) instead of `playerStore.favorites` directly, because
+// the library mutates the bound array in place during drag, which would
+// trigger every `watchEffect` on favorites + the auto-save in the store
+// on every frame. We sync external changes (add/remove from elsewhere)
+// into the mirror via a watcher; on drag end we push the mirror back
+// into the store via `reorderFavorites` (which internally checks for
+// no-op reorders and avoids spurious sync events).
+const draggableModel = ref<FavoriteStation[]>([...playerStore.favorites])
+watch(
+  () => playerStore.favorites,
+  (next) => {
+    // External update (favorite add/remove from another view, server pull,
+    // etc). Only resync when the SET of stations differs — re-syncing on
+    // pure reorder events would override the user's drag mid-gesture.
+    const a = next.map(f => f.stationuuid).slice().sort().join(',')
+    const b = draggableModel.value.map(f => f.stationuuid).slice().sort().join(',')
+    if (a !== b) {
+      draggableModel.value = [...next]
+    }
+  },
+  { deep: true }
+)
+
+const onReorderEnd = () => {
+  playerStore.reorderFavorites(draggableModel.value.slice())
+}
+
+// One-time hint banner. Persisted to localStorage so we don't pester the
+// user every time they open the page. Shown only when there are >=2
+// favorites (otherwise drag is meaningless).
+const REORDER_HINT_KEY = 'favorites-reorder-hint-seen-v222'
+const reorderHintSeen = ref<boolean>(false)
+onMounted(() => {
+  try {
+    reorderHintSeen.value = localStorage.getItem(REORDER_HINT_KEY) === '1'
+  } catch {
+    reorderHintSeen.value = false
+  }
+})
+const showReorderHint = computed(
+  () => !reorderHintSeen.value && playerStore.favorites.length >= 2
+)
+const dismissReorderHint = () => {
+  reorderHintSeen.value = true
+  try {
+    localStorage.setItem(REORDER_HINT_KEY, '1')
+  } catch {
+    /* private mode / quota — fall through, just don't crash. */
+  }
+}
 
 const playStation = (station: RadioStation) => {
   playerStore.playStation(station)

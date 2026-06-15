@@ -94,7 +94,9 @@ export const createSimpleTranslations = (): Record<SupportedLanguage, any> => {
       clearConfirmTitle: 'Clear Favorites',
       clearConfirmMessage: 'Are you sure you want to clear all favorite stations? This action cannot be undone.',
       cancel: 'Cancel',
-      clear: 'Clear'
+      clear: 'Clear',
+      reorderHint: 'Long-press to drag and reorder',
+      reorderHintDismiss: 'Got it'
     },
     history: {
       title: 'History',
@@ -331,7 +333,9 @@ export const createSimpleTranslations = (): Record<SupportedLanguage, any> => {
         clearConfirmTitle: '清空收藏夹',
         clearConfirmMessage: '确定要清空所有收藏的电台吗？此操作无法撤销。',
         cancel: '取消',
-        clear: '清空'
+        clear: '清空',
+        reorderHint: '长按拖动即可调整顺序',
+        reorderHintDismiss: '知道了'
       },
       history: {
         title: '足迹',
